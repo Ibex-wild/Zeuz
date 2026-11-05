@@ -1,3 +1,4 @@
+<img src="zeuz.webp" alt="Zeuz logo" width="200">
 # Zeuz Language Reference
 
 Draft reference for the Zeuz programming language, version 1.0.
