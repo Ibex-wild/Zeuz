@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="zeuz.webp" alt="Zeuz logo" width="700">
+  <img src="zeuz.webp" alt="Zeuz logo" width="500">
 </p>
 # Zeuz Language Reference
 
