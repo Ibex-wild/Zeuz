@@ -1,6 +1,7 @@
 <p align="center">
   <img src="zeuz.webp" alt="Zeuz logo" width="500">
 </p>
+
 # Zeuz Language Reference
 
 Draft reference for the Zeuz programming language, version 1.0.
