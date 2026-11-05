@@ -1,0 +1,1316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Zeuz Language v1.0</title>
+</head>
+<body>
+
+<h1>Zeuz Language v1.0</h1>
+
+<p><strong>Status:</strong> Draft<br>
+<strong>Document identifier:</strong> ZEUZ-1.0<br>
+
+<hr>
+
+<h2>0. Front Matter</h2>
+
+<h3>0.1 Document Status</h3>
+<p>This document is a Draft reference. It is normative for the version of the Zeuz compiler identified in Section 0.2. A Draft reference MAY be revised without notice. Implementations that claim conformance MUST identify the reference version they implement.</p>
+
+<h3>0.2 Version</h3>
+<p>The version identifier of this reference is <code>1.0</code>. The identifier <code>1.0</code> refers to this document as a whole. Individual sections MUST NOT be cited as belonging to a different version than the document.</p>
+
+<h3>0.3 Date</h3>
+<p>The date of this revision is 2024-01-01.</p>
+
+<h3>0.4 RFC 2119 Keywords</h3>
+<p>The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT, RECOMMENDED, MAY, and OPTIONAL in this document are to be interpreted as described in RFC 2119.</p>
+<ul>
+<li>MUST and SHALL indicate an absolute requirement of the reference.</li>
+<li>MUST NOT and SHALL NOT indicate an absolute prohibition.</li>
+<li>SHOULD and RECOMMENDED indicate that there may exist valid reasons to ignore a requirement, but the full implications must be understood before choosing a different course.</li>
+<li>MAY and OPTIONAL indicate a truly optional feature.</li>
+</ul>
+
+<h3>0.5 Change Log</h3>
+<ul>
+<li>1.0 (2024-01-01): Initial draft. Defines lexical structure, grammar, type system, expressions, statements, scoping, built-in functions, memory model, program structure, and reserved keywords for the Zeuz 1.0 compiler.</li>
+</ul>
+
+<hr>
+
+<h2>1. Scope</h2>
+
+<h3>1.1 What This Reference Specifies</h3>
+<p>This reference specifies the following aspects of the Zeuz programming language:</p>
+<ol>
+<li>The lexical structure of source files with extension <code>.zz</code>.</li>
+<li>The grammar of Zeuz programs, expressed in Extended Backus-Naur Form (EBNF).</li>
+<li>The static semantics of Zeuz programs, that is, the constraints that a well-formed program MUST satisfy and that a conforming implementation MUST diagnose.</li>
+<li>The dynamic semantics of Zeuz programs, that is, the observable behavior of a well-formed program when executed.</li>
+<li>The memory model, including allocation, lifetime, aliasing, and the guarantees that the language does and does not make.</li>
+<li>The interface of the built-in functions <code>print</code>, <code>len</code>, <code>input</code>, and <code>assert</code>.</li>
+<li>The program structure required for a program to be executable, in particular the requirement for a function named <code>entryf</code>.</li>
+</ol>
+
+<h3>1.2 What This Reference Does Not Specify</h3>
+<p>This reference does not specify:</p>
+<ol>
+<li>The application binary interface (ABI) of a compiled Zeuz binary, including calling conventions, stack layout, and register usage. These are implementation-defined.</li>
+<li>The behavior of any linker or assembler invoked by the compiler toolchain.</li>
+<li>The optimizations performed by the implementation. A conforming implementation MAY emit any code whose observable behavior matches the behavior specified in this document.</li>
+<li>The presence, content, or format of debug information, unless stated otherwise.</li>
+<li>The behavior of a program that exhibits undefined behavior as listed in Section 13.4.</li>
+<li>The behavior of a program whose resource consumption exceeds the limits of the host system.</li>
+<li>The textual format of diagnostic messages. A conforming implementation MUST emit a diagnostic, but the content of the message is implementation-defined.</li>
+</ol>
+
+<hr>
+
+<h2>2. Normative References</h2>
+<p>The following documents are referenced normatively. Implementations MUST interpret terms defined in this reference according to the referenced documents where this reference is silent.</p>
+<p><strong>2.1 LLVM Language Reference Manual.</strong> The implementation uses LLVM as its code generation backend. The semantics of the generated LLVM IR, including the semantics of integer arithmetic, floating-point arithmetic, and memory operations, are defined by the LLVM Language Reference. Where this reference specifies a behavior different from the LLVM behavior (for example, division by zero, see Section 8.6.9), this reference takes precedence and the implementation MUST insert the necessary runtime checks.</p>
+<p><strong>2.2 ISO/IEC 9899 (C standard).</strong> The built-in functions of Zeuz delegate to the corresponding C standard library functions. The observable behavior of the following C functions, as invoked by the Zeuz runtime helpers, is defined by the C standard and by the C library on the target platform: <code>printf</code>, <code>malloc</code>, <code>memcpy</code>, <code>memset</code>, <code>strlen</code>, <code>strcmp</code>, <code>snprintf</code>, <code>fgets</code>, <code>fputs</code>, <code>fflush</code>, <code>exit</code>, <code>floor</code>. In addition, the objects <code>stdin</code>, <code>stdout</code>, and <code>stderr</code> are the C standard streams.</p>
+<p><strong>2.3 IEEE 754-2019.</strong> The representation and arithmetic behavior of the type <code>float</code> are those of IEEE 754 binary64 (double precision), except where explicitly restricted in Section 7.1.3.</p>
+<p><strong>2.4 RFC 2119.</strong> Key words for use in RFCs to indicate requirement levels.</p>
+
+<hr>
+
+<h2>3. Terms and Definitions</h2>
+<p>For the purposes of this document, the following terms apply.</p>
+<p><strong>3.1 Source file.</strong> A sequence of bytes with the extension <code>.zz</code> that is supplied to the compiler as input.</p>
+<p><strong>3.2 Compilation unit.</strong> The sequence of tokens produced by the lexer from a single source file, together with the abstract syntax tree produced by the parser from those tokens. A compilation unit corresponds to exactly one source file. Zeuz 1.0 has no mechanism for combining multiple compilation units.</p>
+<p><strong>3.3 Program.</strong> A compilation unit that has been successfully parsed and has passed static semantic analysis. A program is the unit of compilation.</p>
+<p><strong>3.4 Well-formed program.</strong> A program that satisfies every constraint defined in this reference. A conforming implementation MUST accept every well-formed program.</p>
+<p><strong>3.5 Ill-formed program.</strong> A program that violates at least one constraint defined in this reference. A conforming implementation MUST reject every ill-formed program and MUST emit at least one diagnostic message. The point at which rejection occurs (during lexing, parsing, static analysis, or code generation) is implementation-defined.</p>
+<p><strong>3.6 Undefined behavior.</strong> Behavior for which this reference imposes no requirements. A program that exhibits undefined behavior has no defined output, exit code, or side effect. Section 13.4 lists the conditions that produce undefined behavior in Zeuz 1.0.</p>
+<p><strong>3.7 Implementation-defined behavior.</strong> Behavior for which this reference requires the implementation to choose a behavior but does not mandate a specific choice. The implementation MUST document its choice. Section 13.5 lists the implementation-defined behaviors of Zeuz 1.0.</p>
+<p><strong>3.8 Unspecified behavior.</strong> Behavior for which this reference provides two or more permissible outcomes and does not require the implementation to document which outcome occurs. Zeuz 1.0 does not introduce unspecified behavior beyond what is inherited from the C standard library.</p>
+<p><strong>3.9 Diagnostic message.</strong> A message emitted by a conforming implementation in response to an ill-formed program. A diagnostic message MUST identify the source file and SHOULD identify the line and column of the offending construct.</p>
+<p><strong>3.10 Observable behavior.</strong> The sequence of bytes written to the standard output stream, the sequence of bytes written to the standard error stream, and the exit code of the process.</p>
+<p><strong>3.11 Value.</strong> A member of the set {integer value, floating-point value, string value, void value} as defined in Section 7.</p>
+<p><strong>3.12 Lvalue.</strong> An expression that denotes a storage location. In Zeuz 1.0, the only expressions that denote storage locations are variable references and array index expressions when used as the target of an assignment.</p>
+<p><strong>3.13 Truthy.</strong> A value is truthy if it is an integer value not equal to zero, a floating-point value not equal to 0.0, or a string value with at least one character. The boolean value <code>false</code> and the integer value zero are not truthy. See Section 8.6.7.</p>
+<p><strong>3.14 Entry point function.</strong> A function declaration with the identifier <code>entryf</code> and the return type <code>void</code>, whose body is executed at program startup. See Section 13.2.</p>
+<p><strong>3.15 Runtime helper.</strong> A function emitted by the implementation into the generated module, with an identifier beginning with <code>zz_</code>, that provides a service required by the semantics of a built-in or operator. Runtime helpers are not part of the source language surface syntax and MUST NOT be referenced by a Zeuz program.</p>
+
+<hr>
+
+<h2>4. Conformance</h2>
+
+<h3>4.1 Conforming Implementation</h3>
+<p>An implementation conforms to this reference if and only if:</p>
+<ol>
+<li>It accepts every well-formed program, as defined in this reference, and produces an executable whose observable behavior matches the behavior specified in this document.</li>
+<li>It rejects every ill-formed program, as defined in this reference, and emits at least one diagnostic message.</li>
+<li>It documents every implementation-defined behavior listed in Section 13.5.</li>
+<li>It does not silently accept any construct that this reference declares ill-formed.</li>
+</ol>
+
+<h3>4.2 Extensions</h3>
+<p><strong>4.2.1</strong> An implementation MAY accept source text that is not covered by this reference, provided that the acceptance of such source text does not alter the observable behavior of any well-formed program that does not use the extension.</p>
+<p><strong>4.2.2</strong> An implementation that provides extensions MUST document them and MUST provide a mode in which the extensions are rejected.</p>
+<p><strong>4.2.3</strong> In this revision of the reference, Zeuz 1.0 defines no extensions. All constructs listed in Section 5.7 as Reserved Keywords MUST be rejected when used in a position where a statement is expected.</p>
+
+<h3>4.3 Quality of Implementation</h3>
+<p>The following are not conformance requirements and are listed for information:</p>
+<ul>
+<li>An implementation SHOULD report the line and column of the first error it encounters.</li>
+<li>An implementation SHOULD NOT produce a partial binary when compilation fails.</li>
+<li>An implementation SHOULD reject every program in which a variable is used before it is initialized.</li>
+</ul>
+
+<hr>
+
+<h2>5. Lexical Structure</h2>
+
+<h3>5.1 Source Encoding</h3>
+<p><strong>5.1.1</strong> A source file MUST be encoded as a sequence of bytes. The implementation MUST interpret the bytes as UTF-8 encoded text for the purpose of extracting tokens.</p>
+<p><strong>5.1.2</strong> A byte sequence that is not valid UTF-8 yields implementation-defined behavior. Implementations SHOULD report a diagnostic.</p>
+<p><strong>5.1.3</strong> Non-ASCII characters MAY appear inside string literals and character literals. Their interpretation is implementation-defined. In the reference implementation of Zeuz 1.0, non-ASCII bytes in a string literal are copied verbatim into the string's runtime representation. The behavior of <code>len()</code> on such a string counts bytes, not characters.</p>
+<p><strong>5.1.4</strong> A source file MAY begin with a UTF-8 byte order mark (U+FEFF). If present, the implementation MUST skip it. The byte order mark is not a token.</p>
+
+<h3>5.2 Whitespace</h3>
+<p><strong>5.2.1</strong> The following characters are whitespace: space (U+0020), horizontal tab (U+0009), carriage return (U+000D), and line feed (U+000A).</p>
+<p><strong>5.2.2</strong> Whitespace characters separate tokens and are otherwise ignored. A sequence of one or more whitespace characters is equivalent to a single whitespace character.</p>
+<p><strong>5.2.3 Line endings.</strong> A line feed (U+000A) terminates a line. A carriage return followed by a line feed (U+000D U+000A) also terminates a line and is treated as a single line terminator. A standalone carriage return (U+000D) is treated as whitespace but does not terminate a line.</p>
+<p><strong>5.2.4</strong> The implementation MUST track line and column numbers for diagnostic purposes, but the exact column at which a token is reported is implementation-defined.</p>
+
+<h3>5.3 Comments</h3>
+<p><strong>5.3.1</strong> A line comment begins with the sequence <code>//</code> (U+002F U+002F) and extends to, but does not include, the next line terminator. A line comment is replaced by a single whitespace character.</p>
+<p><strong>5.3.2</strong> A block comment begins with the sequence <code>/*</code> (U+002F U+002A) and ends with the sequence <code>*/</code> (U+002A U+002F). A block comment is replaced by a single whitespace character.</p>
+<p><strong>5.3.3</strong> Block comments nest. Each occurrence of <code>/*</code> within a block comment increments the nesting level. Each occurrence of <code>*/</code> decrements the nesting level. The comment terminates when the nesting level reaches zero. A block comment that reaches the end of the source file without terminating is ill-formed and MUST be diagnosed.</p>
+<p><strong>5.3.4</strong> The tokens <code>//</code> and <code>/*</code> are recognized at any point where a token may begin. A <code>//</code> inside a string literal or a character literal is part of the literal, not a comment.</p>
+
+<h3>5.4 Tokens</h3>
+<p><strong>5.4.1</strong> The lexer partitions the source file into a sequence of tokens. Each token belongs to exactly one of the following categories: keyword, identifier, integer literal, float literal, string literal, character literal, operator, punctuator.</p>
+<p><strong>5.4.2</strong> The lexer MUST produce the longest match at each position. For example, the sequence <code>==</code> MUST be lexed as the equality operator, not as two assignment operators.</p>
+<p><strong>5.4.3</strong> A token that is not recognized as belonging to any category above is ill-formed and MUST be diagnosed.</p>
+
+<h3>5.5 Identifiers</h3>
+<p><strong>5.5.1</strong> An identifier is a sequence of one or more identifier characters.</p>
+<p><strong>5.5.2</strong> The identifier characters are: <code>a</code> through <code>z</code>, <code>A</code> through <code>Z</code>, <code>0</code> through <code>9</code>, and the underscore character <code>_</code>.</p>
+<p><strong>5.5.3</strong> The first character of an identifier MUST be <code>a</code> through <code>z</code>, <code>A</code> through <code>Z</code>, or <code>_</code>. The first character MUST NOT be a digit.</p>
+<p><strong>5.5.4</strong> Identifiers are case-sensitive. <code>foo</code>, <code>Foo</code>, and <code>FOO</code> denote three distinct identifiers.</p>
+<p><strong>5.5.5</strong> The grammar for an identifier is:</p>
+<pre><code>Identifier      ::= IdentifierStart IdentifierChar*
+IdentifierStart ::= "a"..."z" | "A"..."Z" | "_"
+IdentifierChar  ::= IdentifierStart | "0"..."9"</code></pre>
+<p><strong>5.5.6</strong> An identifier that matches a keyword listed in Section 5.6 is lexed as a keyword, not as an identifier. An identifier that matches a reserved keyword listed in Section 5.7 is lexed as a keyword and is subject to the constraints of Section 5.7.</p>
+<p><strong>5.5.7</strong> An identifier MAY be of any length. The reference implementation of Zeuz 1.0 imposes no upper bound.</p>
+
+<h3>5.6 Keywords</h3>
+<p><strong>5.6.1</strong> The following identifiers are keywords that are recognized by the parser and that have a defined meaning in Zeuz 1.0:</p>
+<ul>
+<li>Control-flow keywords: <code>if</code>, <code>else</code>, <code>while</code>, <code>for</code>, <code>do</code>, <code>loop</code>, <code>break</code>, <code>continue</code>, <code>return</code>.</li>
+<li>Statement keywords: <code>print</code>, <code>assert</code>.</li>
+<li>Literal keywords: <code>true</code>, <code>false</code>, <code>null</code>, <code>nullptr</code>, <code>inf</code>, <code>nan</code>.</li>
+<li>Type-name keywords: <code>int</code>, <code>float</code>, <code>string</code>, <code>void</code>, <code>bool</code>, <code>char</code>, <code>byte</code>, <code>i8</code>, <code>i16</code>, <code>i32</code>, <code>i64</code>, <code>i128</code>, <code>u8</code>, <code>u16</code>, <code>u32</code>, <code>u64</code>, <code>u128</code>, <code>usize</code>, <code>isize</code>, <code>f16</code>, <code>f32</code>, <code>f64</code>.</li>
+</ul>
+<p><strong>5.6.2</strong> A keyword MUST NOT be used as an identifier in any declaration. Using a keyword as an identifier is ill-formed.</p>
+
+<h3>5.7 Reserved Keywords</h3>
+<p><strong>5.7.1</strong> The following identifiers are lexed as keywords but do not have a defined meaning in Zeuz 1.0. They are reserved for future versions of the language. A source file that uses any of these keywords in any position is ill-formed and MUST be diagnosed with an implementation-defined message.</p>
+<p><strong>5.7.2</strong> Reserved keywords, grouped by intended future feature:</p>
+<ul>
+<li>Pattern matching: <code>match</code>, <code>case</code>, <code>default</code>.</li>
+<li>Error handling and deferral: <code>guard</code>, <code>defer</code>, <code>try</code>, <code>catch</code>, <code>finally</code>, <code>throw</code>, <code>panic</code>, <code>recover</code>.</li>
+<li>Module system: <code>import</code>, <code>namespace</code>, <code>export</code>, <code>pub</code>, <code>extern</code>.</li>
+<li>Macro system: <code>macro</code>.</li>
+<li>Declaration forms: <code>fn</code>, <code>let</code>, <code>var</code>, <code>const</code>, <code>type</code>.</li>
+<li>Object-orientation: <code>class</code>, <code>trait</code>, <code>impl</code>, <code>extends</code>, <code>super</code>, <code>this</code>, <code>self</code>, <code>interface</code>, <code>struct</code>, <code>enum</code>.</li>
+<li>Concurrency: <code>async</code>, <code>await</code>, <code>spawn</code>, <code>join</code>, <code>lock</code>, <code>unlock</code>, <code>atomic</code>, <code>sync</code>.</li>
+<li>Pointer and reference syntax: <code>ptr</code>, <code>rawptr</code>, <code>ref</code>, <code>new</code>, <code>delete</code>, <code>move</code>.</li>
+<li>Type operators: <code>sizeof</code>, <code>typeof</code>.</li>
+<li>Storage and safety attributes: <code>unsafe</code>, <code>asm</code>, <code>in</code>, <code>as</code>, <code>pad</code>, <code>reusable</code>, <code>simd</code>, <code>recursive</code>, <code>thread_fn</code>, <code>varint</code>, <code>any</code>, <code>auto</code>.</li>
+<li>Miscellaneous: <code>arr</code>, <code>slice</code>, <code>yield</code>, <code>goto</code>, <code>block</code>.</li>
+</ul>
+<p><strong>5.7.3</strong> The keyword <code>do</code> is used by the do-while statement (Section 9.6) and is therefore not in the reserved list. The keyword <code>block</code> is reserved and MUST be diagnosed. An earlier draft of this reference incorrectly listed <code>do</code> as reserved; this draft corrects the error.</p>
+<p><strong>5.7.4</strong> The reference implementation of Zeuz 1.0 rejects every reserved keyword except <code>do</code>, which is a recognized keyword, and the type-name keywords and literal keywords listed in Section 5.6.1, which are recognized. All other keywords that are lexed but not handled by the parser produce a diagnostic of the form <code>'&lt;keyword&gt;' statement not yet implemented</code> or <code>'&lt;keyword&gt;' declarations not yet implemented</code>.</p>
+
+<h3>5.8 Integer Literals</h3>
+<p><strong>5.8.1</strong> An integer literal is a sequence of one or more decimal digits.</p>
+<p><strong>5.8.2</strong> Zeuz 1.0 does not support hexadecimal, octal, or binary integer literals. A leading <code>0</code> is permitted and does not change the meaning; <code>042</code> denotes the integer value forty-two.</p>
+<p><strong>5.8.3</strong> The grammar for an integer literal is:</p>
+<pre><code>IntegerLiteral ::= Digit+
+Digit          ::= "0"..."9"</code></pre>
+<p><strong>5.8.4</strong> The value of an integer literal is the mathematical value of the digit sequence, interpreted as a signed 64-bit integer. If the mathematical value is not representable in a signed 64-bit integer, the program is ill-formed and MUST be diagnosed.</p>
+<p><strong>5.8.5</strong> A negative integer literal such as <code>-1</code> is lexed as two tokens: the unary minus operator <code>-</code> followed by the integer literal <code>1</code>. The parser then forms a unary expression. See Section 8.7.</p>
+
+<h3>5.9 Float Literals</h3>
+<p><strong>5.9.1</strong> A float literal is a sequence of one or more decimal digits, followed by a single period <code>.</code>, followed by one or more decimal digits.</p>
+<p><strong>5.9.2</strong> Zeuz 1.0 does not support exponent notation such as <code>1e10</code>. A float literal that does not contain a decimal point is lexed as an integer literal, not a float literal.</p>
+<p><strong>5.9.3</strong> The grammar for a float literal is:</p>
+<pre><code>FloatLiteral ::= Digit+ "." Digit+</code></pre>
+<p><strong>5.9.4</strong> The value of a float literal is the mathematical value of the digit sequence, rounded to the nearest representable value in IEEE 754 binary64. The rounding mode is implementation-defined.</p>
+<p><strong>5.9.5</strong> A float literal whose magnitude exceeds the range of IEEE 754 binary64 is ill-formed and MUST be diagnosed.</p>
+<p><strong>5.9.6</strong> A negative float literal such as <code>-3.14</code> is lexed as the unary minus operator followed by the float literal <code>3.14</code>.</p>
+
+<h3>5.10 String Literals</h3>
+<p><strong>5.10.1</strong> A string literal begins with a double quote <code>"</code> (U+0022) and ends with a double quote. Between the quotes, zero or more string characters appear.</p>
+<p><strong>5.10.2</strong> A string character is any byte except <code>"</code> (U+0022), <code>\</code> (U+005C), or a line terminator, unless it is part of an escape sequence.</p>
+<p><strong>5.10.3</strong> The following escape sequences are recognized:</p>
+<ul>
+<li><code>\n</code> produces the line feed character (U+000A).</li>
+<li><code>\t</code> produces the horizontal tab character (U+0009).</li>
+<li><code>\r</code> produces the carriage return character (U+000D).</li>
+<li><code>\\</code> produces the backslash character (U+005C).</li>
+<li><code>\"</code> produces the double quote character (U+0022).</li>
+</ul>
+<p><strong>5.10.4</strong> An escape sequence not listed in Section 5.10.3 is ill-formed and MUST be diagnosed. In particular, <code>\0</code>, <code>\'</code>, <code>\x</code>, and <code>\u</code> are not recognized.</p>
+<p><strong>5.10.5</strong> A string literal that contains an unescaped line terminator is ill-formed. Zeuz 1.0 does not support multiline string literals.</p>
+<p><strong>5.10.6</strong> The grammar for a string literal is:</p>
+<pre><code>StringLiteral   ::= '"' StringChar* '"'
+StringChar      ::= any byte except '"', '\\', or line terminator
+                  | EscapeSequence
+EscapeSequence  ::= "\\" ( "n" | "t" | "r" | "\\" | '"' )</code></pre>
+<p><strong>5.10.7</strong> The runtime representation of a string is a null-terminated byte sequence. See Section 12.5.</p>
+
+<h3>5.11 Character Literals</h3>
+<p><strong>5.11.1</strong> A character literal begins with a single quote <code>'</code> (U+0027) and ends with a single quote. Between the quotes, exactly one character appears, which may be an escape sequence.</p>
+<p><strong>5.11.2</strong> The escape sequences recognized inside a character literal are <code>\n</code>, <code>\t</code>, <code>\r</code>, <code>\\</code>, <code>\'</code>, and <code>\0</code>. The first five correspond to the same byte values as in Section 5.10.3. <code>\0</code> produces the null byte (U+0000).</p>
+<p><strong>5.11.3</strong> The value of a character literal is the integer value of the byte it contains, in the range 0 to 255 inclusive. Character literals have type <code>int</code>.</p>
+<p><strong>5.11.4</strong> The grammar for a character literal is:</p>
+<pre><code>CharLiteral    ::= "'" CharBody "'"
+CharBody       ::= SingleChar | CharEscape
+SingleChar     ::= any byte except "'", '\\', or line terminator
+CharEscape     ::= "\\" ( "n" | "t" | "r" | "\\" | "'" | "0" )</code></pre>
+<p><strong>5.11.5</strong> A character literal that contains zero characters, or more than one character, is ill-formed and MUST be diagnosed.</p>
+
+<h3>5.12 Boolean and Null Literals</h3>
+<p><strong>5.12.1</strong> The keywords <code>true</code> and <code>false</code> denote the integer values one and zero respectively. They have type <code>int</code>.</p>
+<p><strong>5.12.2</strong> The keywords <code>null</code> and <code>nullptr</code> denote the integer value zero. They have type <code>int</code>.</p>
+
+<h3>5.13 Special Float Literals</h3>
+<p><strong>5.13.1</strong> The keyword <code>inf</code> denotes the IEEE 754 positive infinity value. It has type <code>float</code>.</p>
+<p><strong>5.13.2</strong> The keyword <code>nan</code> denotes the IEEE 754 quiet NaN value. It has type <code>float</code>.</p>
+<p><strong>5.13.3</strong> The unary minus operator applied to <code>inf</code> produces negative infinity. The unary minus operator applied to <code>nan</code> produces a NaN, but whether the sign bit is preserved is implementation-defined.</p>
+
+<h3>5.14 Operators</h3>
+<p><strong>5.14.1</strong> The following two-character operator tokens are recognized:</p>
+<pre><code>==   !=   &lt;=   &gt;=   &amp;&amp;   ||</code></pre>
+<p><strong>5.14.2</strong> The following single-character operator tokens are recognized:</p>
+<pre><code>+   -   *   /   =   !   &lt;   &gt;</code></pre>
+<p><strong>5.14.3</strong> The following characters are NOT operators in Zeuz 1.0 and are ill-formed when they appear where an operator is expected: <code>%</code>, <code>&amp;</code>, <code>|</code>, <code>^</code>, <code>~</code>, <code>?</code>, <code>:</code>, <code>.</code>, <code>#</code>, <code>@</code>, <code>$</code>.</p>
+<p><strong>5.14.4</strong> The implementation MUST lex <code>==</code> as a single token even when the surrounding whitespace would allow reading <code>=</code> <code>=</code> as two tokens. The longest-match rule of Section 5.4.2 applies.</p>
+
+<h3>5.15 Punctuators</h3>
+<p><strong>5.15.1</strong> The following punctuator tokens are recognized:</p>
+<pre><code>(   )   {   }   [   ]   ;   ,</code></pre>
+<p><strong>5.15.2</strong> No other punctuator tokens exist in Zeuz 1.0.</p>
+<p><strong>5.15.3</strong> The implementation MUST lex each punctuator as a single-character token except where a two-character operator would be the longest match (which never occurs for punctuators).</p>
+
+<hr>
+
+<h2>6. Grammar (EBNF)</h2>
+
+<h3>6.1 Notation</h3>
+<p><strong>6.1.1</strong> The grammar in this section uses Extended Backus-Naur Form (EBNF) with the following conventions:</p>
+<ul>
+<li>A production has the form <code>Name ::= Definition</code>.</li>
+<li>Alternatives are separated by <code>|</code>.</li>
+<li>Parentheses group alternatives.</li>
+<li>A postfix <code>*</code> indicates zero or more occurrences.</li>
+<li>A postfix <code>+</code> indicates one or more occurrences.</li>
+<li>A postfix <code>?</code> indicates zero or one occurrence.</li>
+<li>Terminal tokens appear in double quotes.</li>
+</ul>
+<p><strong>6.1.2</strong> Whitespace and comments are removed by the lexer before parsing (Section 5.2, Section 5.3). The grammar in this section is a grammar over the token stream, not over characters.</p>
+<p><strong>6.1.3</strong> Every production is assigned a number in the form <code>G.n.m</code>, where <code>n</code> is the section number and <code>m</code> is a sequence number within the section.</p>
+
+<h3>6.2 Program Structure Productions</h3>
+<pre><code>G.6.2.1  Program      ::= TopLevelDecl*
+G.6.2.2  TopLevelDecl ::= FunctionDecl | Statement</code></pre>
+<p><strong>6.2.1</strong> A program is a sequence of top-level declarations. Each top-level declaration is either a function declaration or a statement.</p>
+<p><strong>6.2.2</strong> A program MUST contain exactly one function declaration whose name is <code>entryf</code>. See Section 13.2.</p>
+
+<h3>6.3 Declaration Productions</h3>
+<pre><code>G.6.3.1  FunctionDecl ::= TypeName Identifier "(" ParamList? ")" Block
+G.6.3.2  ParamList    ::= Param ( "," Param )*
+G.6.3.3  Param        ::= TypeName Identifier "[" "]"?
+G.6.3.4  VarDecl      ::= TypeName Identifier ( "[" Expression "]" ( "=" "{" ArrayInit? "}" )? | "=" Expression )? ";"
+G.6.3.5  ArrayInit    ::= Expression ( "," Expression )*</code></pre>
+<p><strong>6.3.1</strong> A function declaration consists of a return type, an identifier, a parameter list, and a body. The body MUST be a block (Section 6.4.2).</p>
+<p><strong>6.3.2</strong> A parameter list MAY be empty.</p>
+<p><strong>6.3.3</strong> A parameter is either a scalar parameter (<code>TypeName Identifier</code>) or an array parameter (<code>TypeName Identifier []</code>). An array parameter is passed as a pointer to the first element; the length is not passed. See Section 9.13.4 and Section 12.4.3.</p>
+<p><strong>6.3.4</strong> A variable declaration consists of a type name, an identifier, and one of: an array size expression in square brackets optionally followed by an initializer list in braces; an optional initializer expression introduced by <code>=</code>; or neither, in which case the variable is default-initialized (Section 9.1.2). The declaration MUST be terminated by a semicolon.</p>
+
+<h3>6.4 Statement Productions</h3>
+<pre><code>G.6.4.1   Statement    ::= VarDecl
+                        | Block
+                        | IfStatement
+                        | WhileStatement
+                        | DoWhileStatement
+                        | ForStatement
+                        | LoopStatement
+                        | ReturnStatement
+                        | PrintStatement
+                        | AssertStatement
+                        | BreakStatement
+                        | ContinueStatement
+                        | ExprStatement
+                        | FunctionDecl
+G.6.4.2   Block        ::= "{" Statement* "}"
+G.6.4.3   IfStatement  ::= "if" "(" Expression ")" Statement ( "else" Statement )?
+G.6.4.4   WhileStatement ::= "while" "(" Expression ")" Statement
+G.6.4.5   DoWhileStatement ::= "do" Statement "while" "(" Expression ")" ";"
+G.6.4.6   ForStatement ::= "for" "(" ForInit? ";" Expression? ";" Expression? ")" Statement
+G.6.4.7   ForInit      ::= VarDecl | ExprStatement
+G.6.4.8   LoopStatement ::= "loop" Statement
+G.6.4.9   ReturnStatement ::= "return" Expression? ";"
+G.6.4.10  PrintStatement ::= "print" Expression ";"
+G.6.4.11  AssertStatement ::= "assert" "(" Expression ")" ";"
+G.6.4.12  BreakStatement ::= "break" ";"
+G.6.4.13  ContinueStatement ::= "continue" ";"
+G.6.4.14  ExprStatement ::= Expression ";"</code></pre>
+
+<h3>6.5 Expression Productions</h3>
+<pre><code>G.6.5.1   Expression     ::= LogicalOr
+G.6.5.2   LogicalOr      ::= LogicalAnd ( "||" LogicalAnd )*
+G.6.5.3   LogicalAnd     ::= Equality ( "&amp;&amp;" Equality )*
+G.6.5.4   Equality       ::= Comparison ( ( "==" | "!=" ) Comparison )*
+G.6.5.5   Comparison     ::= Additive ( ( "&lt;" | "&gt;" | "&lt;=" | "&gt;=" ) Additive )*
+G.6.5.6   Additive       ::= Multiplicative ( ( "+" | "-" ) Multiplicative )*
+G.6.5.7   Multiplicative ::= Unary ( ( "*" | "/" ) Unary )*
+G.6.5.8   Unary          ::= ( "-" | "!" ) Unary
+                          | Cast
+                          | Postfix
+G.6.5.9   Cast           ::= "(" TypeName ")" Unary
+G.6.5.10  Postfix        ::= Primary PostfixSuffix*
+G.6.5.11  PostfixSuffix  ::= "(" ArgList? ")"
+                          | "[" Expression "]"
+                          | "=" Expression
+G.6.5.12  ArgList        ::= Expression ( "," Expression )*
+G.6.5.13  Primary        ::= IntegerLiteral
+                          | FloatLiteral
+                          | StringLiteral
+                          | CharLiteral
+                          | "true" | "false" | "null" | "nullptr"
+                          | "inf" | "nan"
+                          | Identifier
+                          | "(" Expression ")"
+G.6.5.14  TypeName       ::= "int" | "float" | "string" | "void"
+                          | "bool" | "char" | "byte"
+                          | "i8" | "i16" | "i32" | "i64" | "i128"
+                          | "u8" | "u16" | "u32" | "u64" | "u128"
+                          | "usize" | "isize"
+                          | "f16" | "f32" | "f64"</code></pre>
+
+<h3>6.6 Precedence Cross-Reference</h3>
+<p><strong>6.6.1</strong> The grammar in Section 6.5 encodes the precedence of operators by the nesting of productions. A production that appears lower in the list binds more tightly. The precedence table is reproduced in Appendix C.</p>
+<p><strong>6.6.2</strong> All binary operators are left-associative. The grammar encodes this by using left recursion in the <code>*</code>-repetition form.</p>
+<p><strong>6.6.3</strong> The unary operators <code>-</code> and <code>!</code>, and the cast operator, are right-associative and bind tighter than the additive operators.</p>
+<p><strong>6.6.4</strong> Postfix operators (call, index, assignment) bind tighter than unary operators.</p>
+<p><strong>6.6.5</strong> The assignment operator <code>=</code> in G.6.5.11 is only permitted when the target of the postfix chain is a variable reference or an array index expression. See Section 8.8.</p>
+
+<hr>
+
+<h2>7. Types and Type System</h2>
+
+<h3>7.1 Primitive Types</h3>
+<p><strong>7.1.1</strong> Zeuz 1.0 has exactly four primitive types: <code>int</code>, <code>float</code>, <code>string</code>, and <code>void</code>.</p>
+<p><strong>7.1.2</strong> The type <code>int</code> represents a signed 64-bit integer. The representation is two's complement. The range of representable values is -2^63 to 2^63 - 1 inclusive. See Section 14.2 for the rationale.</p>
+<p><strong>7.1.3</strong> The type <code>float</code> represents an IEEE 754 binary64 floating-point value. The special values positive infinity, negative infinity, and NaN are representable and observable through the keywords <code>inf</code> and <code>nan</code> and through arithmetic operations that produce them.</p>
+<p><strong>7.1.4</strong> The type <code>string</code> represents a pointer to a null-terminated byte sequence in heap storage. The byte sequence is not bounded by any length field; its length is computed by scanning for the null terminator. See Section 12.5.</p>
+<p><strong>7.1.5</strong> The type <code>void</code> is the type of expressions that produce no value and of function declarations that return no value. An expression of type <code>void</code> MUST NOT appear as an operand of any operator, as an argument to a function call, or as the value of a variable declaration.</p>
+
+<h3>7.2 Integer Type Aliases</h3>
+<p><strong>7.2.1</strong> The following type names denote exactly the same type as <code>int</code>: <code>bool</code>, <code>char</code>, <code>byte</code>, <code>i8</code>, <code>i16</code>, <code>i32</code>, <code>i64</code>, <code>i128</code>, <code>u8</code>, <code>u16</code>, <code>u32</code>, <code>u64</code>, <code>u128</code>, <code>usize</code>, <code>isize</code>.</p>
+<p><strong>7.2.2</strong> The width implied by these names MUST NOT be enforced by the implementation. In particular, a variable declared <code>u8 x = 300;</code> MUST be accepted and MUST store the value 300. Similarly, a variable declared <code>i8 x = -200;</code> MUST be accepted and MUST store the value -200. This is a deliberate simplification of the type system. See Section 14.2.</p>
+<p><strong>7.2.3</strong> The signedness implied by these names (for example, the distinction between <code>i32</code> and <code>u32</code>) MUST NOT be enforced. All integer operations are performed as signed 64-bit operations.</p>
+
+<h3>7.3 Float Type Aliases</h3>
+<p><strong>7.3.1</strong> The following type names denote exactly the same type as <code>float</code>: <code>f16</code>, <code>f32</code>, <code>f64</code>.</p>
+<p><strong>7.3.2</strong> The width implied by these names MUST NOT be enforced by the implementation. A variable declared <code>f16 x = 3.14;</code> stores the full IEEE 754 binary64 value of <code>3.14</code>, not a value rounded to half precision.</p>
+
+<h3>7.4 The void Type</h3>
+<p><strong>7.4.1</strong> The type <code>void</code> is used only as the return type of a function declaration. Declaring a variable of type <code>void</code> is ill-formed and MUST be diagnosed.</p>
+<p><strong>7.4.2</strong> A function declared with return type <code>void</code> MUST NOT contain a <code>return</code> statement with an operand. A <code>return</code> statement without an operand in a void function is well-formed.</p>
+<p><strong>7.4.3</strong> The type of a call expression to a void function is <code>void</code>. Using such a call expression as an operand of any operator is ill-formed.</p>
+
+<h3>7.5 Type Compatibility</h3>
+<p><strong>7.5.1</strong> Two types are compatible if and only if they are the same type, or if both are integer aliases (Section 7.2), or if both are float aliases (Section 7.3).</p>
+<p><strong>7.5.2</strong> An assignment of a value of type <code>float</code> to a variable of type <code>int</code> is ill-formed and MUST be diagnosed. This is a static check, not a runtime check. See Section 8.8.1.4.</p>
+<p><strong>7.5.3</strong> An assignment of a value of type <code>int</code> to a variable of type <code>float</code> is well-formed and performs an implicit widening conversion from int to float. See Section 8.8.1.3.</p>
+<p><strong>7.5.4</strong> An assignment of a value of type <code>string</code> to a variable of type <code>string</code> is well-formed. Assignments between <code>string</code> and any other type are ill-formed.</p>
+<p><strong>7.5.5</strong> An assignment of a value of any type to a variable of type <code>void</code> is ill-formed.</p>
+
+<h3>7.6 Type Inference</h3>
+<p><strong>7.6.1</strong> Zeuz 1.0 does not perform type inference. Every variable declaration MUST include an explicit type name. The type of a variable is the type declared. See Section 9.1.</p>
+<p><strong>7.6.2</strong> The type of an expression is computed by the rules in Section 8. The type of a function's return value is declared explicitly in the function declaration. No inference occurs.</p>
+
+<h3>7.7 Casting Rules</h3>
+<p><strong>7.7.1</strong> The cast expression <code>(TypeName) Expr</code> converts the value of <code>Expr</code> to the named type, provided the conversion is defined. The following conversions are defined:</p>
+<ul>
+<li><code>(int) f</code> where <code>f</code> has type <code>float</code>: converts the float to an integer by truncating toward zero. If <code>f</code> is NaN, infinity, or outside the range of a signed 64-bit integer, the result is implementation-defined.</li>
+<li><code>(float) i</code> where <code>i</code> has type <code>int</code>: converts the integer to a float. The conversion is exact for values in the range -2^53 to 2^53 inclusive.</li>
+<li><code>(string) i</code> where <code>i</code> has type <code>int</code>: converts the integer to its decimal representation as a string, allocated on the heap.</li>
+<li><code>(string) f</code> where <code>f</code> has type <code>float</code>: converts the float to a string. If the float is finite and has no fractional part, the result has the form <code>N.0</code>. Otherwise the result has the form produced by the C <code>printf("%g")</code> format.</li>
+</ul>
+<p><strong>7.7.2</strong> A cast to the same type as the operand produces the operand unchanged. A cast from <code>string</code> to any other type is ill-formed and MUST be diagnosed. A cast from <code>void</code> to any type is ill-formed.</p>
+<p><strong>7.7.3</strong> A cast expression does not change the source-level type of the operand for the purpose of static checks elsewhere in the program.</p>
+
+<hr>
+
+<h2>8. Expressions</h2>
+
+<h3>8.1 Integer Literals</h3>
+<p><strong>8.1.1</strong> An integer literal denotes a value of type <code>int</code>. The value is computed according to Section 5.8.4.</p>
+<p><strong>8.1.2</strong> The type of an integer literal is <code>int</code>, regardless of the number of digits. There is no separate type for large literals.</p>
+<p><strong>8.1.3</strong> Example:</p>
+<pre><code>int x = 42;      // x has value 42
+int y = 0;       // y has value 0
+int z = 042;     // z has value 42; leading zero is permitted and ignored</code></pre>
+
+<h3>8.2 Float Literals</h3>
+<p><strong>8.2.1</strong> A float literal denotes a value of type <code>float</code>. The value is computed according to Section 5.9.4.</p>
+<p><strong>8.2.2</strong> The type of a float literal is <code>float</code>, regardless of whether the value is integral (for example, <code>1.0</code> has type <code>float</code>, not <code>int</code>).</p>
+<p><strong>8.2.3</strong> A float literal MUST contain a decimal point followed by at least one digit. The token <code>1.</code> and the token <code>.5</code> are ill-formed. <code>1.0</code> and <code>0.5</code> are well-formed.</p>
+<p><strong>8.2.4</strong> Example:</p>
+<pre><code>float a = 3.14;    // a has value 3.14
+float b = 1.0;     // b has value 1.0, type float
+float c = -2.5;    // parsed as unary minus applied to 2.5</code></pre>
+
+<h3>8.3 String Literals</h3>
+<p><strong>8.3.1</strong> A string literal denotes a value of type <code>string</code>. The value is a pointer to a null-terminated byte sequence allocated in heap storage at the point where the literal is evaluated.</p>
+<p><strong>8.3.2</strong> Each evaluation of a string literal produces a pointer to the same byte sequence. The implementation MAY allocate the byte sequence once at program start and reuse the pointer for every evaluation of the same literal, or MAY allocate a fresh copy on each evaluation. Both behaviors are conforming. A program MUST NOT rely on either behavior, except that the byte sequence is immutable and the pointer is valid for the lifetime of the process.</p>
+<p><strong>8.3.3</strong> The byte sequence does not include the surrounding quotes. The byte sequence includes an implicit null terminator byte (value 0) immediately after the last byte of the literal content.</p>
+<p><strong>8.3.4</strong> Example:</p>
+<pre><code>string s = "hello";          // s points to the bytes 'h' 'e' 'l' 'l' 'o' 0
+string t = "line1\nline2";   // escape \n produces a newline byte (value 10)
+string u = "";               // empty string, byte sequence is a single null byte</code></pre>
+
+<h3>8.4 Character Literals</h3>
+<p><strong>8.4.1</strong> A character literal denotes a value of type <code>int</code>. The value is the integer value of the contained byte, in the range 0 to 255 inclusive.</p>
+<p><strong>8.4.2</strong> Character literals are provided for readability. There is no separate <code>char</code> type at the semantic level. A character literal and the equivalent integer literal are interchangeable.</p>
+<p><strong>8.4.3</strong> Example:</p>
+<pre><code>int a = 'A';    // a has value 65
+int b = '\n';   // b has value 10
+int c = '\0';   // c has value 0
+int d = 'A' + 1; // d has value 66</code></pre>
+
+<h3>8.5 Variable References</h3>
+<p><strong>8.5.1</strong> A variable reference is an identifier that denotes a variable in scope (Section 10).</p>
+<p><strong>8.5.2</strong> When a variable reference appears in a context that requires a value (an rvalue context), it is evaluated to the current value of the variable. The type of the expression is the declared type of the variable.</p>
+<p><strong>8.5.3</strong> When a variable reference appears as the target of an assignment (Section 8.8), it denotes the storage location of the variable, not its current value.</p>
+<p><strong>8.5.4</strong> If the variable is an array (declared with an array size, or declared as an array parameter), using the variable name in a scalar context is ill-formed and MUST be diagnosed. The only permitted uses of an array variable name are:</p>
+<ul>
+<li>As the target of an assignment expression of the form <code>name = ...</code>, which is ill-formed (Section 8.8.1.5).</li>
+<li>As an argument to a function parameter declared as an array (Section 8.11.4).</li>
+<li>As the argument to <code>len()</code> (Section 11.2).</li>
+<li>As the argument to <code>print</code> (Section 11.1).</li>
+<li>As the condition of an <code>if</code>, <code>while</code>, <code>do-while</code>, or <code>for</code> statement (Section 8.6.7).</li>
+</ul>
+<p><strong>8.5.5</strong> Example:</p>
+<pre><code>int x = 5;
+int y = x + 1;    // x is evaluated to 5; y is 6
+x = 10;           // x denotes the storage location; 10 is stored
+int z = x;        // z is 10
+
+int arr[3];
+int v = arr;      // ill-formed: array used in scalar context</code></pre>
+
+<h3>8.6 Binary Operators</h3>
+
+<h4>8.6.1 Overview</h4>
+<p><strong>8.6.1.1</strong> The binary operators are <code>+</code>, <code>-</code>, <code>*</code>, <code>/</code>, <code>==</code>, <code>!=</code>, <code>&lt;</code>, <code>&gt;</code>, <code>&lt;=</code>, <code>&gt;=</code>, <code>&amp;&amp;</code>, <code>||</code>.</p>
+<p><strong>8.6.1.2</strong> The left operand is evaluated before the right operand. This order MUST be observed by the implementation. A program MAY rely on this order when the operands have side effects.</p>
+<p><strong>8.6.1.3</strong> The precedence and associativity of binary operators are defined by Section 6.5 and reproduced in Appendix C.</p>
+
+<h4>8.6.2 Arithmetic Operators: +, -, *, /</h4>
+<p><strong>8.6.2.1</strong> If both operands have type <code>int</code>, the operator is an integer operation and the result has type <code>int</code>.</p>
+<p><strong>8.6.2.2</strong> If at least one operand has type <code>float</code>, the operator is a floating-point operation. The int operand, if any, is implicitly converted to <code>float</code> by a widening conversion. The result has type <code>float</code>.</p>
+<p><strong>8.6.2.3</strong> If either operand has type <code>string</code>, <code>+</code> is the string concatenation operator (Section 8.6.6). The operators <code>-</code>, <code>*</code>, and <code>/</code> applied to a string operand are ill-formed and MUST be diagnosed.</p>
+<p><strong>8.6.2.4</strong> Integer overflow in <code>+</code>, <code>-</code>, or <code>*</code> is not detected. The behavior is to compute the result modulo 2^64 interpreted as a signed 64-bit integer. This is well-defined behavior for Zeuz 1.0. The implementation MUST NOT terminate the program on integer overflow.</p>
+<p><strong>8.6.2.5</strong> Floating-point arithmetic follows IEEE 754 binary64 with round-to-nearest-even as the default rounding mode. Operations that produce infinity or NaN produce those values; the implementation MUST NOT terminate the program in that case.</p>
+<p><strong>8.6.2.6</strong> Example:</p>
+<pre><code>int a = 7 + 3;         // a = 10
+int b = 7 - 3;         // b = 4
+int c = 7 * 3;         // c = 21
+int d = 7 / 3;         // d = 2 (integer division truncates toward zero)
+float e = 7.0 / 3.0;   // e is approximately 2.3333333333333335
+float f = 7 / 3.0;     // f is approximately 2.3333333333333335; int 7 promoted</code></pre>
+
+<h4>8.6.3 Comparison Operators on Numeric Operands: &lt;, &gt;, &lt;=, &gt;=</h4>
+<p><strong>8.6.3.1</strong> If both operands are numeric (<code>int</code> or <code>float</code>), the comparison is numeric. If at least one operand is <code>float</code>, both operands are converted to <code>float</code> before comparison.</p>
+<p><strong>8.6.3.2</strong> The result of a comparison is a value of type <code>int</code>, equal to 1 if the comparison is true and 0 if the comparison is false.</p>
+<p><strong>8.6.3.3</strong> Comparisons involving NaN are false, except that <code>!=</code> involving NaN is true (Section 8.6.4.4).</p>
+<p><strong>8.6.3.4</strong> If either operand is <code>string</code>, the comparison is a string comparison (Section 8.6.8).</p>
+<p><strong>8.6.3.5</strong> Example:</p>
+<pre><code>int a = 3 &lt; 5;       // a = 1
+int b = 3 &gt; 5;       // b = 0
+int c = 3 &lt;= 3;      // c = 1
+int d = 3.5 &gt;= 3;    // d = 1 (3 promoted to 3.0)</code></pre>
+
+<h4>8.6.4 Equality Operators on Numeric Operands: ==, !=</h4>
+<p><strong>8.6.4.1</strong> If both operands are numeric, the comparison is numeric following the same conversion rules as Section 8.6.3.1.</p>
+<p><strong>8.6.4.2</strong> If either operand is <code>string</code>, the comparison is a string comparison (Section 8.6.8).</p>
+<p><strong>8.6.4.3</strong> The result of an equality comparison is a value of type <code>int</code>, equal to 1 if true and 0 if false.</p>
+<p><strong>8.6.4.4</strong> Comparisons involving NaN: <code>==</code> with NaN is false, <code>!=</code> with NaN is true.</p>
+
+<h4>8.6.5 Truthiness of Binary Results</h4>
+<p><strong>8.6.5.1</strong> The result of a comparison operator and of a logical operator has type <code>int</code> and is either 0 or 1. This value MAY be used directly as an integer, for example in an arithmetic expression.</p>
+<p><strong>8.6.5.2</strong> The result of a comparison is truthy if and only if it equals 1 (Section 3.13).</p>
+
+<h4>8.6.6 String Concatenation</h4>
+<p><strong>8.6.6.1</strong> If at least one operand of <code>+</code> has type <code>string</code>, the operator performs string concatenation.</p>
+<p><strong>8.6.6.2</strong> Each operand is first converted to <code>string</code> according to the rules of Section 7.7.1: an <code>int</code> operand is converted to its decimal representation; a <code>float</code> operand is converted according to the <code>N.0</code> or <code>%g</code> rule; a <code>string</code> operand is used as-is.</p>
+<p><strong>8.6.6.3</strong> The result is a newly allocated string containing the bytes of the left operand followed by the bytes of the right operand. The allocation is performed with the C <code>malloc</code> function. The allocated memory is not freed by the runtime; see Section 12.2.</p>
+<p><strong>8.6.6.4</strong> Example:</p>
+<pre><code>string s = "x = " + 5;             // s is "x = 5"
+string t = "pi is " + 3.14;        // t is "pi is 3.14"
+string u = "a" + "b" + "c";        // u is "abc"
+string v = 1 + " " + 2.0;          // v is "1 2.0"</code></pre>
+
+<h4>8.6.7 Truthiness</h4>
+<p><strong>8.6.7.1</strong> In a context that requires a truth value (the condition of an <code>if</code>, <code>while</code>, <code>do-while</code>, or <code>for</code> statement, the operand of <code>!</code>, or the operand of <code>&amp;&amp;</code> or <code>||</code>), the expression is evaluated to a truth value according to the following rules:</p>
+<ul>
+<li>An <code>int</code> value is truthy if and only if it is not equal to 0.</li>
+<li>A <code>float</code> value is truthy if and only if it is not equal to 0.0. NaN is truthy.</li>
+<li>A <code>string</code> value is truthy if and only if its length is greater than 0. A string consisting of a single null byte is not truthy.</li>
+<li>An array value in a truthiness context is truthy if and only if its declared length is greater than 0.</li>
+</ul>
+<p><strong>8.6.7.2</strong> Example:</p>
+<pre><code>if (1)     { print "yes"; }   // prints "yes"
+if (0)     { print "yes"; }   // does not print
+if (0.0)   { print "yes"; }   // does not print
+if ("")    { print "yes"; }   // does not print
+if ("a")   { print "yes"; }   // prints "yes"</code></pre>
+
+<h4>8.6.8 String Comparison Operators</h4>
+<p><strong>8.6.8.1</strong> The equality operators <code>==</code> and <code>!=</code>, and the comparison operators <code>&lt;</code>, <code>&gt;</code>, <code>&lt;=</code>, <code>&gt;=</code>, when applied to two operands of type <code>string</code>, compare the byte sequences, not the pointers.</p>
+<p><strong>8.6.8.2</strong> The comparison is performed by the C standard library function <code>strcmp</code>, which returns a negative value, zero, or a positive value depending on the lexicographic order of the byte sequences as unsigned characters. The result of the Zeuz operator is a value of type <code>int</code>, equal to 1 if the comparison holds and 0 if it does not.</p>
+<p><strong>8.6.8.3</strong> Two string values that point to distinct memory locations but contain the same byte sequence compare equal under <code>==</code>. Conversely, two string values that point to the same location always compare equal, but this is a consequence of the content being equal, not a separate rule.</p>
+<p><strong>8.6.8.4</strong> The operators <code>&lt;</code>, <code>&gt;</code>, <code>&lt;=</code>, <code>&gt;=</code> on strings compare the byte sequences lexicographically. This is not locale-sensitive; it is the C <code>strcmp</code> order.</p>
+<p><strong>8.6.8.5</strong> Example:</p>
+<pre><code>string a = "hello";
+string b = "hello";
+string c = "world";
+int e = (a == b);    // e = 1; equal byte sequences
+int f = (a != c);    // f = 1
+int g = (a &lt; c);     // g = 1; "hello" precedes "world"
+int h = (c &gt; a);     // h = 1</code></pre>
+
+<h4>8.6.9 Division by Zero</h4>
+<p><strong>8.6.9.1</strong> The operator <code>/</code> performs a runtime check on the right operand. If the right operand is equal to zero (for <code>int</code>) or to 0.0 (for <code>float</code>), the implementation MUST terminate the program with exit code 1 and MUST write the diagnostic message <code>division by zero\n</code> to the standard error stream.</p>
+<p><strong>8.6.9.2</strong> The exact bytes written to the standard error stream are <code>division by zero</code> followed by a single newline byte. This is a normative requirement so that a test suite can check for it.</p>
+<p><strong>8.6.9.3</strong> The implementation MUST NOT produce a floating-point infinity as the result of division by zero. This differs from IEEE 754 default behavior and from C. Section 2.1 states that this reference takes precedence over LLVM in this regard.</p>
+<p><strong>8.6.9.4</strong> The check is performed on every evaluation of the operator, including in dead code that the optimizer might otherwise remove. The implementation MUST NOT optimize away the check.</p>
+<p><strong>8.6.9.5</strong> Example:</p>
+<pre><code>int a = 10 / 2;      // a = 5
+int b = 10 / 0;      // program terminates with exit code 1, stderr: division by zero
+float c = 1.0 / 0.0; // program terminates with exit code 1, stderr: division by zero</code></pre>
+
+<h4>8.6.10 Logical Operators: &amp;&amp; and ||</h4>
+<p><strong>8.6.10.1</strong> The operators <code>&amp;&amp;</code> and <code>||</code> perform short-circuit evaluation. The left operand is evaluated first, converted to a truth value (Section 8.6.7), and the result determines whether the right operand is evaluated.</p>
+<p><strong>8.6.10.2</strong> For <code>&amp;&amp;</code>: if the left operand is not truthy, the result is 0 and the right operand is not evaluated. Otherwise the right operand is evaluated, converted to a truth value, and the result is 1 if the right operand is truthy and 0 otherwise.</p>
+<p><strong>8.6.10.3</strong> For <code>||</code>: if the left operand is truthy, the result is 1 and the right operand is not evaluated. Otherwise the right operand is evaluated, converted to a truth value, and the result is 1 if the right operand is truthy and 0 otherwise.</p>
+<p><strong>8.6.10.4</strong> The result of <code>&amp;&amp;</code> or <code>||</code> has type <code>int</code> and is either 0 or 1.</p>
+<p><strong>8.6.10.5</strong> Example:</p>
+<pre><code>int a = 1 &amp;&amp; 1;    // a = 1
+int b = 1 &amp;&amp; 0;    // b = 0
+int c = 0 || 1;    // c = 1
+int d = 0 || 0;    // d = 0
+
+int x = 0;
+int e = (x != 0) &amp;&amp; (10 / x &gt; 1);  // e = 0; division is not evaluated</code></pre>
+
+<h3>8.7 Unary Operators</h3>
+
+<h4>8.7.1 Arithmetic Negation: -</h4>
+<p><strong>8.7.1.1</strong> The unary minus operator applies to a numeric operand. If the operand is <code>int</code>, the result is the two's complement negation, well-defined for all values including the most negative value. If the operand is <code>float</code>, the result is the IEEE 754 negation, which flips the sign bit.</p>
+<p><strong>8.7.1.2</strong> The unary minus operator applied to a <code>string</code> operand is ill-formed.</p>
+<p><strong>8.7.1.3</strong> Example:</p>
+<pre><code>int a = -5;         // a = -5
+float b = -3.14;    // b = -3.14
+float c = -inf;     // c is negative infinity</code></pre>
+
+<h4>8.7.2 Logical Negation: !</h4>
+<p><strong>8.7.2.1</strong> The unary operator <code>!</code> applies to any operand. The operand is evaluated and converted to a truth value (Section 8.6.7). The result is 1 if the operand is not truthy and 0 if it is truthy.</p>
+<p><strong>8.7.2.2</strong> The result has type <code>int</code>.</p>
+<p><strong>8.7.2.3</strong> Example:</p>
+<pre><code>int a = !0;         // a = 1
+int b = !1;         // b = 0
+int c = !"";        // c = 1
+int d = !"x";       // d = 0
+int e = !3.14;      // e = 0</code></pre>
+
+<h3>8.8 Assignment Expressions</h3>
+
+<h4>8.8.1 Assignment to a Variable</h4>
+<p><strong>8.8.1.1</strong> The assignment expression <code>name = value</code> stores the value of the right operand into the storage location named by <code>name</code>. The identifier <code>name</code> MUST resolve to a variable in scope (Section 10).</p>
+<p><strong>8.8.1.2</strong> The value of the assignment expression is the value that was stored, with the type of the variable.</p>
+<p><strong>8.8.1.3</strong> If the variable has type <code>float</code> and the right operand has type <code>int</code>, the right operand is converted to <code>float</code> before storage. The value of the assignment expression has type <code>float</code>.</p>
+<p><strong>8.8.1.4</strong> If the variable has type <code>int</code> and the right operand has type <code>float</code>, the assignment is ill-formed and MUST be diagnosed. See Section 7.5.2.</p>
+<p><strong>8.8.1.5</strong> Assignment to an array variable as a whole is ill-formed and MUST be diagnosed. Individual elements may be assigned via an indexed assignment (Section 8.9).</p>
+<p><strong>8.8.1.6</strong> Example:</p>
+<pre><code>int x = 0;
+int y = (x = 5);        // x is 5, y is 5
+float f = 0.0;
+float g = (f = 3);      // f is 3.0, g is 3.0
+int z = 0;
+z = 3.14;               // ill-formed: cannot assign float to int</code></pre>
+
+<h4>8.8.2 Assignment as an Expression</h4>
+<p><strong>8.8.2.1</strong> Because assignment is an expression, it may appear as a subexpression. For example, <code>a = b = c</code> parses as <code>a = (b = c)</code> because assignment is right-associative. The value of the inner assignment is the value stored in <code>b</code>, which is then stored in <code>a</code>.</p>
+
+<h3>8.9 Array Index Assignment</h3>
+<p><strong>8.9.1</strong> The indexed assignment expression <code>name[index] = value</code> stores the value of <code>value</code> into the element of the array <code>name</code> at position <code>index</code>. The identifier <code>name</code> MUST resolve to an array variable in scope. The index expression MUST have type <code>int</code>.</p>
+<p><strong>8.9.2</strong> If the array element type is <code>float</code> and the right operand has type <code>int</code>, the right operand is converted to <code>float</code> before storage. If the array element type is <code>int</code> and the right operand has type <code>float</code>, the assignment is ill-formed and MUST be diagnosed.</p>
+<p><strong>8.9.3</strong> The value of the indexed assignment expression is the value that was stored.</p>
+<p><strong>8.9.4</strong> The index is not bounds-checked. See Section 8.10.4.</p>
+<p><strong>8.9.5</strong> Example:</p>
+<pre><code>int arr[5];
+arr[0] = 10;
+arr[1] = arr[0] + 5;    // arr[1] = 15
+float fa[3];
+fa[0] = 1;              // 1 is converted to 1.0
+int x = arr[1];         // x = 15</code></pre>
+
+<h3>8.10 Array Indexing</h3>
+<p><strong>8.10.1</strong> The array indexing expression <code>name[index]</code> evaluates to the element of the array <code>name</code> at position <code>index</code>. When used in a context that requires a value, the result has the element type of the array.</p>
+<p><strong>8.10.2</strong> The identifier <code>name</code> MUST resolve to an array variable in scope. The index expression MUST have type <code>int</code>.</p>
+<p><strong>8.10.3</strong> The index is evaluated before the element is read.</p>
+<p><strong>8.10.4 No bounds check.</strong> The implementation MUST NOT insert a runtime bounds check on array indexing, whether for reading or for writing. An index that is negative or greater than or equal to the declared length produces undefined behavior (Section 13.4). A conforming program MUST NOT index outside the declared bounds.</p>
+<p><strong>8.10.5</strong> Example:</p>
+<pre><code>int arr[3] = {10, 20, 30};
+int a = arr[0];      // a = 10
+int b = arr[2];      // b = 30
+int i = 1;
+int c = arr[i];      // c = 20
+int d = arr[3];      // undefined behavior: index out of bounds
+int e = arr[-1];     // undefined behavior: negative index</code></pre>
+
+<h3>8.11 Function Calls</h3>
+<p><strong>8.11.1</strong> A function call expression has the form <code>name(arg1, arg2, ..., argN)</code>, where <code>name</code> is an identifier that resolves to a function declaration in the program, and each <code>argK</code> is an expression. The number of arguments MUST equal the number of parameters declared by the function.</p>
+<p><strong>8.11.2</strong> The arguments are evaluated in source order, from left to right. A program MAY rely on this order when the arguments have side effects.</p>
+<p><strong>8.11.3</strong> Each argument is converted to the declared type of the corresponding parameter before the call, according to the assignment rules of Section 7.5.</p>
+<p><strong>8.11.4</strong> If the parameter is declared as an array parameter (Section 6.3.3), the corresponding argument MUST be an array variable in scope. Passing anything other than a variable name is ill-formed. The array length is not passed.</p>
+<p><strong>8.11.5</strong> The type of the call expression is the declared return type of the function.</p>
+<p><strong>8.11.6</strong> The implementation MUST permit a call to a function declared later in the source file than the call site (Section 10.5).</p>
+<p><strong>8.11.7</strong> Example:</p>
+<pre><code>int add(int a, int b) { return a + b; }
+int sum(int arr[], int n) {
+    int s = 0;
+    int i = 0;
+    while (i &lt; n) { s = s + arr[i]; i = i + 1; }
+    return s;
+}
+
+int x = add(2, 3);              // x = 5
+int data[3] = {10, 20, 30};
+int y = sum(data, 3);           // y = 60
+int z = add(2.5, 3);            // ill-formed: 2.5 is float, parameter is int
+int w = sum(data[0], 3);        // ill-formed: argument is not an array variable</code></pre>
+
+<h3>8.12 Cast Expressions</h3>
+<p><strong>8.12.1</strong> A cast expression has the form <code>(TypeName) operand</code>, where <code>TypeName</code> is one of the keywords listed in Section 6.5.14 and <code>operand</code> is a unary expression. The cast is right-associative and binds tighter than binary operators.</p>
+<p><strong>8.12.2</strong> The cast converts the operand to the named type. The permitted conversions are listed in Section 7.7.1.</p>
+<p><strong>8.12.3</strong> The type of the cast expression is the named type. For integer type aliases, the type is <code>int</code>; for float type aliases, the type is <code>float</code>.</p>
+<p><strong>8.12.4</strong> Example:</p>
+<pre><code>int a = (int) 3.9;            // a = 3 (truncation toward zero)
+float b = (float) 7;          // b = 7.0
+string c = (string) 42;       // c = "42"
+string d = (string) 3.14;     // d = "3.14"
+string e = (string) 1.0;      // e = "1.0" (integral float)
+float f = (float) "hello";    // ill-formed: cannot cast string to float
+int g = (int) "hello";        // ill-formed</code></pre>
+
+<hr>
+
+<h2>9. Statements</h2>
+
+<h3>9.1 Variable Declaration</h3>
+
+<h4>9.1.1 Grammar</h4>
+<p>See production G.6.3.4 and G.6.3.5. A variable declaration has one of the following forms:</p>
+<pre><code>TypeName Identifier ;
+TypeName Identifier = Expression ;
+TypeName Identifier [ Expression ] ;
+TypeName Identifier [ Expression ] = { ArrayInit } ;</code></pre>
+
+<h4>9.1.2 Scalar Declaration Without Initializer</h4>
+<p><strong>9.1.2.1</strong> The declaration <code>TypeName name;</code> introduces a variable of the named type with the default value for that type: <code>0</code> for <code>int</code>, <code>0.0</code> for <code>float</code>, <code>""</code> (the empty string) for <code>string</code>.</p>
+<p><strong>9.1.2.2</strong> Declaring a variable of type <code>void</code> is ill-formed.</p>
+
+<h4>9.1.3 Scalar Declaration With Initializer</h4>
+<p><strong>9.1.3.1</strong> The declaration <code>TypeName name = Expression;</code> introduces a variable with the value of the initializer expression, converted according to the assignment rules of Section 7.5.</p>
+
+<h4>9.1.4 Array Declaration</h4>
+<p><strong>9.1.4.1</strong> The declaration <code>TypeName name[Size];</code> introduces an array of <code>Size</code> elements, each of the declared type. The size expression MUST have type <code>int</code>.</p>
+<p><strong>9.1.4.2</strong> A negative size expression produces a runtime error: the implementation MUST terminate the program with exit code 1 and write <code>negative array size\n</code> to the standard error stream.</p>
+<p><strong>9.1.4.3</strong> The elements of an array declared without an initializer list are zero-initialized.</p>
+
+<h4>9.1.5 Array Declaration With Initializer List</h4>
+<p><strong>9.1.5.1</strong> The declaration <code>TypeName name[Size] = {e1, e2, ..., ek};</code> introduces an array with the value of <code>e1</code> in position 0, and so on. If <code>k &lt; Size</code>, the remaining elements are zero-initialized. If <code>k &gt; Size</code>, the extra initializers are evaluated and discarded; this behavior is implementation-defined.</p>
+<p><strong>9.1.5.2</strong> Each initializer expression MUST be convertible to the element type.</p>
+
+<h4>9.1.6 Examples</h4>
+<pre><code>int a;                          // a = 0
+int b = 5;                      // b = 5
+float f;                        // f = 0.0
+string s;                       // s = ""
+int arr[3];                     // arr = {0, 0, 0}
+int arr2[3] = {10, 20, 30};     // arr2 = {10, 20, 30}
+float fa[2] = {1, 2};           // fa = {1.0, 2.0}
+int n = 5;
+int vla[n];                     // runtime-sized array of 5 zeros
+
+int bad1 = 3.14;                // ill-formed: float initializer for int
+int bad2[2] = {1.0, 2.0};       // ill-formed: float in int array initializer
+void bad3;                      // ill-formed: void variable</code></pre>
+
+<h3>9.2 Expression Statement</h3>
+<p><strong>9.2.1</strong> An expression statement is an expression followed by a semicolon. The expression is evaluated and its value is discarded.</p>
+<pre><code>x + 1;          // evaluates x + 1, discards the result
+x = 5;          // assignment; the result 5 is discarded
+f(3);           // function call; the return value is discarded</code></pre>
+
+<h3>9.3 Block Statement</h3>
+<p><strong>9.3.1</strong> A block statement is a sequence of zero or more statements enclosed in braces. The block introduces a new scope (Section 10.1).</p>
+<pre><code>{
+    int x = 1;
+    {
+        int x = 2;      // shadows outer x
+        print x;        // prints 2
+    }
+    print x;            // prints 1
+}</code></pre>
+
+<h3>9.4 If Statement</h3>
+<p><strong>9.4.1</strong> The <code>if</code> statement has the form <code>if (Cond) ThenStmt</code> or <code>if (Cond) ThenStmt else ElseStmt</code>. The condition is evaluated to a truth value. If the condition is truthy, <code>ThenStmt</code> is executed; otherwise, <code>ElseStmt</code> is executed if present.</p>
+<p><strong>9.4.2</strong> Dangling-else ambiguity is resolved by attaching <code>else</code> to the nearest unmatched <code>if</code>.</p>
+<pre><code>int x = 10;
+if (x &gt; 5) {
+    print "greater";
+} else if (x == 5) {
+    print "equal";
+} else {
+    print "less";
+}</code></pre>
+
+<h3>9.5 While Statement</h3>
+<p><strong>9.5.1</strong> The <code>while</code> statement has the form <code>while (Cond) Body</code>. The condition is evaluated before each iteration. If truthy, the body executes and the loop repeats.</p>
+<p><strong>9.5.2</strong> A <code>break</code> statement exits the loop immediately. A <code>continue</code> statement skips the remainder of the current iteration and returns to the condition check.</p>
+<pre><code>int i = 0;
+while (i &lt; 3) {
+    print i;
+    i = i + 1;
+}
+// Output: 0, 1, 2 (each on its own line)</code></pre>
+
+<h3>9.6 Do-While Statement</h3>
+<p><strong>9.6.1</strong> The <code>do-while</code> statement has the form <code>do Body while (Cond);</code>. The body is executed once, then the condition is evaluated. If truthy, the body executes again.</p>
+<p><strong>9.6.2</strong> The trailing semicolon after the closing parenthesis is required.</p>
+<pre><code>int i = 0;
+do {
+    print i;
+    i = i + 1;
+} while (i &lt; 3);
+// Output: 0, 1, 2</code></pre>
+
+<h3>9.7 For Statement</h3>
+<p><strong>9.7.1</strong> The <code>for</code> statement has the form <code>for (Init; Cond; Step) Body</code>. The parts are optional. <code>Init</code> is either a variable declaration or an expression statement. <code>Cond</code> is an expression; if omitted, it is always truthy. <code>Step</code> is an expression; if omitted, no step is executed.</p>
+<p><strong>9.7.2</strong> Execution order: <code>Init</code> once, then <code>Cond</code>, body, <code>Step</code>, <code>Cond</code>, body, <code>Step</code>, and so on.</p>
+<p><strong>9.7.3</strong> The <code>for</code> statement introduces a new scope encompassing <code>Init</code>, <code>Cond</code>, <code>Step</code>, and <code>Body</code>.</p>
+<pre><code>for (int i = 0; i &lt; 3; i = i + 1) {
+    print i;
+}
+// Output: 0, 1, 2
+
+int j = 0;
+for (; j &lt; 3; j = j + 1) {
+    print j;
+}
+// Output: 0, 1, 2</code></pre>
+
+<h3>9.8 Loop Statement</h3>
+<p><strong>9.8.1</strong> The <code>loop</code> statement has the form <code>loop Body</code>. It executes the body repeatedly without a condition. The loop MUST be exited via <code>break</code> or <code>return</code>.</p>
+<p><strong>9.8.2</strong> The <code>loop</code> statement is equivalent to <code>while (1) Body</code>.</p>
+<pre><code>int i = 0;
+loop {
+    if (i &gt;= 3) { break; }
+    print i;
+    i = i + 1;
+}
+// Output: 0, 1, 2</code></pre>
+
+<h3>9.9 Break and Continue</h3>
+<p><strong>9.9.1</strong> A <code>break</code> statement terminates execution of the innermost enclosing loop. Control transfers to the statement immediately after the loop.</p>
+<p><strong>9.9.2</strong> A <code>continue</code> statement terminates the current iteration of the innermost enclosing loop and begins the next iteration.</p>
+<p><strong>9.9.3</strong> A <code>break</code> or <code>continue</code> outside of any loop is ill-formed and MUST be diagnosed.</p>
+<pre><code>for (int i = 0; i &lt; 5; i = i + 1) {
+    if (i == 2) { continue; }    // skip 2
+    if (i == 4) { break; }       // exit at 4
+    print i;
+}
+// Output: 0, 1, 3</code></pre>
+
+<h3>9.10 Return Statement</h3>
+<p><strong>9.10.1</strong> A <code>return</code> statement has the form <code>return;</code> or <code>return Expression;</code>. It terminates execution of the enclosing function.</p>
+<p><strong>9.10.2</strong> In a function declared with return type <code>void</code>, a <code>return</code> with an operand is ill-formed.</p>
+<p><strong>9.10.3</strong> In a function declared with a non-<code>void</code> return type, a <code>return</code> without an operand is ill-formed.</p>
+<p><strong>9.10.4</strong> A function with a non-<code>void</code> return type that falls off the end of its body without a <code>return</code> returns a default value: <code>0</code> for <code>int</code>, <code>0.0</code> for <code>float</code>, null for <code>string</code>. This behavior is implementation-defined.</p>
+<p><strong>9.10.5 Special case: return in entryf.</strong> A <code>return</code> statement inside the body of <code>entryf</code> sets the exit code of the program. The return value, if any, is converted to <code>int</code>. A <code>return</code> without an operand sets the exit code to 0.</p>
+<pre><code>int add(int a, int b) {
+    return a + b;
+}
+
+void greet(string name) {
+    print "Hello, " + name;
+    return;
+}
+
+void entryf() {
+    int x = add(2, 3);
+    greet("world");
+    return x;    // sets exit code to 5
+}</code></pre>
+
+<h3>9.11 Print Statement</h3>
+<p><strong>9.11.1</strong> A <code>print</code> statement has the form <code>print Expression;</code>. The expression is evaluated and its value is written to the standard output stream, followed by a newline byte.</p>
+<p><strong>9.11.2</strong> The format of the output depends on the type of the expression:</p>
+<ul>
+<li><code>int</code>: decimal representation, optionally with a leading minus sign.</li>
+<li><code>float</code>: if finite and integral, <code>N.0</code>; otherwise the C <code>printf("%g")</code> format.</li>
+<li><code>string</code>: the bytes of the string.</li>
+<li>Array: <code>[</code>, elements separated by <code>, </code>, each formatted per the element type, then <code>]</code>.</li>
+</ul>
+<p><strong>9.11.3</strong> The <code>print</code> statement is a statement, not an expression.</p>
+<pre><code>print 42;                  // 42
+print 3.14;                // 3.14
+print 1.0;                 // 1.0
+print "hello";             // hello
+int arr[3] = {1, 2, 3};
+print arr;                 // [1, 2, 3]</code></pre>
+
+<h3>9.12 Assert Statement</h3>
+<p><strong>9.12.1</strong> An <code>assert</code> statement has the form <code>assert(Expression);</code>. The expression is evaluated to a truth value. If not truthy, the implementation MUST write <code>assertion failed at line N\n</code> to the standard error stream and MUST terminate the program with exit code 1.</p>
+<p><strong>9.12.2</strong> The line number in the diagnostic is the line of the <code>assert</code> keyword, starting from 1.</p>
+<p><strong>9.12.3</strong> The <code>assert</code> statement is not removed in any build configuration.</p>
+<pre><code>int x = 5;
+assert(x &gt; 0);        // continues
+assert(x &lt; 0);        // terminates with exit 1, stderr: assertion failed at line 3</code></pre>
+
+<h3>9.13 Function Declaration</h3>
+<p><strong>9.13.1</strong> A function declaration consists of a return type, an identifier, a parameter list in parentheses, and a body block.</p>
+<p><strong>9.13.2</strong> The return type MUST be one of the primitive types listed in Section 6.5.14. In Zeuz 1.0, a function MAY NOT return an array.</p>
+<p><strong>9.13.3</strong> Each parameter has a type and an identifier. The identifier MUST be unique within the parameter list.</p>
+<p><strong>9.13.4</strong> An array parameter receives a pointer to the first element of the caller's array. The length is not passed. Inside the callee, <code>len(param)</code> on an array parameter is ill-formed. Writing to an element of an array parameter modifies the caller's array.</p>
+<p><strong>9.13.5</strong> The body MUST be a block. The body introduces a new scope.</p>
+<p><strong>9.13.6</strong> A function MAY be declared after the statements or functions that call it (Section 10.5). A function name MUST NOT be declared twice in the same program.</p>
+<pre><code>int factorial(int n) {
+    if (n &lt;= 1) { return 1; }
+    return n * factorial(n - 1);
+}
+
+int sum(int arr[], int n) {
+    int s = 0;
+    int i = 0;
+    while (i &lt; n) {
+        s = s + arr[i];
+        i = i + 1;
+    }
+    return s;
+}
+
+void entryf() {
+    print factorial(5);         // 120
+    int data[3] = {1, 2, 3};
+    print sum(data, 3);         // 6
+}</code></pre>
+
+<hr>
+
+<h2>10. Scoping and Name Resolution</h2>
+
+<h3>10.1 Block Scope</h3>
+<p><strong>10.1.1</strong> A block statement, a function body, and a <code>for</code> statement each introduce a new scope. The scope extends from the point of introduction to the end of the block, function body, or <code>for</code> statement.</p>
+<p><strong>10.1.2</strong> A variable declared in a scope is visible in that scope and in any nested scope, except where shadowed (Section 10.3).</p>
+<p><strong>10.1.3</strong> A variable is not visible in scopes that enclose its declaration.</p>
+<pre><code>int x = 1;
+{
+    int y = 2;
+    print x + y;    // 3
+}
+print y;            // ill-formed: y is not in scope</code></pre>
+
+<h3>10.2 Function Scope</h3>
+<p><strong>10.2.1</strong> Each function body introduces a scope containing the function's parameters and any variables declared directly in the body.</p>
+<p><strong>10.2.2</strong> Parameters are visible throughout the body, including in nested blocks, unless shadowed by a local declaration.</p>
+<p><strong>10.2.3</strong> Function names are visible throughout the program, regardless of declaration order (Section 10.5).</p>
+<pre><code>void f(int a) {
+    print a;        // a is the parameter
+    {
+        int a = 5;  // shadows the parameter
+        print a;    // 5
+    }
+    print a;        // the parameter again
+}</code></pre>
+
+<h3>10.3 Shadowing</h3>
+<p><strong>10.3.1</strong> A variable declared in a nested scope MAY have the same name as a variable declared in an enclosing scope. The inner declaration shadows the outer one from the point of declaration to the end of the inner scope.</p>
+<p><strong>10.3.2</strong> Shadowing does not produce a diagnostic. It is well-formed.</p>
+<p><strong>10.3.3</strong> After the inner scope ends, the outer variable becomes visible again with its previous value.</p>
+<pre><code>int x = 1;
+{
+    int x = 2;
+    print x;    // 2
+}
+print x;        // 1</code></pre>
+
+<h3>10.4 Redeclaration</h3>
+<p><strong>10.4.1</strong> Declaring two variables with the same name in the same scope is ill-formed and MUST be diagnosed.</p>
+<p><strong>10.4.2</strong> Declaring two functions with the same name in a program is ill-formed and MUST be diagnosed.</p>
+<p><strong>10.4.3</strong> Declaring two parameters with the same name in a function is ill-formed and MUST be diagnosed.</p>
+<p><strong>10.4.4</strong> A variable and a function MAY share a name. The two names occupy separate namespaces and are resolved independently.</p>
+<pre><code>int x = 1;
+int x = 2;          // ill-formed: redeclaration of x
+
+int f() { return 1; }
+int f() { return 2; }   // ill-formed: redeclaration of f</code></pre>
+
+<h3>10.5 Forward References to Functions</h3>
+<p><strong>10.5.1</strong> A function call MAY appear before the declaration of the called function in the source file.</p>
+<p><strong>10.5.2</strong> The function declaration MUST appear somewhere in the same program.</p>
+<pre><code>void entryf() {
+    print add(2, 3);    // forward reference, well-formed
+}
+
+int add(int a, int b) {
+    return a + b;
+}</code></pre>
+
+<h3>10.6 Forward References to Variables</h3>
+<p><strong>10.6.1</strong> A variable reference MUST appear after the variable's declaration in the source text.</p>
+<p><strong>10.6.2</strong> This rule applies whether or not the reference is inside a nested scope.</p>
+<pre><code>void entryf() {
+    print x;            // ill-formed: x is not declared before this line
+    int x = 5;
+    print x;            // 5
+}</code></pre>
+
+<hr>
+
+<h2>11. Semantics of Built-in Functions</h2>
+
+<h3>11.1 print</h3>
+<p><strong>11.1.1</strong> The <code>print</code> statement writes the value of its expression to the standard output stream followed by a single newline byte (value 10). The exact format depends on the type of the expression as defined in Section 9.11.2.</p>
+<p><strong>11.1.2</strong> For a value of type <code>int</code>, the output is the decimal representation of the value, optionally prefixed by a minus sign. Leading zeros are not produced.</p>
+<p><strong>11.1.3</strong> For a value of type <code>float</code>, if the value is finite and has no fractional part, the output has the form <code>N.0</code> where <code>N</code> is the decimal integer part. Otherwise the output is the C <code>printf("%g")</code> format. The values <code>inf</code>, <code>-inf</code>, and <code>nan</code> produce the strings <code>inf</code>, <code>-inf</code>, and <code>nan</code> respectively; the capitalization of these strings is implementation-defined but in the reference implementation is lowercase.</p>
+<p><strong>11.1.4</strong> For a value of type <code>string</code>, the output is the byte sequence of the string. The null terminator is not written.</p>
+<p><strong>11.1.5</strong> For an array value, the output is a left bracket, the elements formatted by the rules for their element type, separated by <code>, </code> (comma and a single space), and a right bracket. An empty array produces <code>[]</code>.</p>
+<p><strong>11.1.6</strong> The <code>print</code> statement does not flush the standard output stream. The stream is flushed at program termination, or when the buffer is full, or when the implementation chooses. Programs that require immediate output (for example, to interleave with input prompts) MUST use <code>input</code>, which flushes <code>stdout</code> before reading.</p>
+<p><strong>11.1.7</strong> Example:</p>
+<pre><code>print 1 + 2;             // 3
+print 3.0;               // 3.0
+print 3.5;               // 3.5
+print "abc" + "def";     // abcdef
+int arr[2] = {7, 8};
+print arr;               // [7, 8]</code></pre>
+
+<h3>11.2 len</h3>
+<p><strong>11.2.1</strong> The built-in function <code>len</code> returns the length of a value of type <code>string</code> or an array.</p>
+<p><strong>11.2.2</strong> For a <code>string</code> value, the result is the number of bytes in the string, excluding the null terminator. The result has type <code>int</code>.</p>
+<p><strong>11.2.3</strong> For a local array, the result is the declared length of the array. The result has type <code>int</code>. For an array parameter (Section 9.13.4), <code>len</code> is ill-formed and MUST be diagnosed, because the callee does not know the length.</p>
+<p><strong>11.2.4</strong> An argument that is neither a <code>string</code> nor an array is ill-formed.</p>
+<p><strong>11.2.5</strong> Example:</p>
+<pre><code>string s = "hello";
+int a = len(s);          // a = 5
+int arr[7];
+int b = len(arr);        // b = 7
+int c = len("");         // c = 0
+
+int f(int p[]) {
+    int n = len(p);      // ill-formed: array parameter has no length
+    return n;
+}</code></pre>
+
+<h3>11.3 input</h3>
+<p><strong>11.3.1</strong> The built-in function <code>input</code> reads one line from the standard input stream and returns it as a value of type <code>string</code>.</p>
+<p><strong>11.3.2</strong> The function takes one argument of type <code>string</code>, the prompt. Before reading, the implementation MUST write the prompt to the standard output stream and flush the stream. If the argument is the empty string, no prompt is written.</p>
+<p><strong>11.3.3</strong> The implementation reads bytes from the standard input stream until a line terminator or end of file. The line terminator, if present, is not included in the result. The result is null-terminated. If end of file is reached with no bytes read, the result is the empty string.</p>
+<p><strong>11.3.4</strong> The line length is limited by the internal buffer size. In the reference implementation of Zeuz 1.0, the limit is 1023 bytes. A line longer than the limit is read in pieces; the first piece is returned and the remainder is available for the next <code>input</code> call.</p>
+<p><strong>11.3.5</strong> The memory for the returned string is allocated with <code>malloc</code> and is not freed by the runtime.</p>
+<p><strong>11.3.6</strong> Example:</p>
+<pre><code>string name = input("Name: ");
+print "Hello, " + name;</code></pre>
+
+<h3>11.4 assert</h3>
+<p><strong>11.4.1</strong> The <code>assert</code> statement evaluates its argument to a truth value. If the value is truthy, execution continues. Otherwise the implementation writes <code>assertion failed at line N\n</code> to the standard error stream, where <code>N</code> is the line number of the <code>assert</code> keyword, and terminates the program with exit code 1.</p>
+<p><strong>11.4.2</strong> The <code>assert</code> statement is a statement, not an expression, and cannot be used in an expression context.</p>
+<p><strong>11.4.3</strong> The <code>assert</code> statement is not removed in any build configuration.</p>
+<p><strong>11.4.4</strong> Example:</p>
+<pre><code>int x = 5;
+assert(x &gt; 0);        // continues
+assert(x &lt; 0);        // terminates with exit 1</code></pre>
+
+<hr>
+
+<h2>12. Memory Model</h2>
+
+<h3>12.1 Stack Allocation</h3>
+<p><strong>12.1.1</strong> Variables declared as scalars (of type <code>int</code>, <code>float</code>, or <code>string</code>) are allocated on the stack of the enclosing function. The storage is released automatically when the function returns.</p>
+<p><strong>12.1.2</strong> Arrays declared with a constant size are allocated on the stack. Arrays declared with a runtime size (VLA-style) are also allocated on the stack; the size is computed at the point of declaration. The allocation MUST be released when the enclosing function returns.</p>
+<p><strong>12.1.3</strong> The initial contents of an array declared without an initializer list are all zero bytes. The initial value of a scalar variable declared without an initializer is the default value for its type (Section 9.1.2).</p>
+
+<h3>12.2 Heap Allocation</h3>
+<p><strong>12.2.1</strong> Values of type <code>string</code> are stored in heap memory allocated with the C <code>malloc</code> function. The following operations allocate heap memory:</p>
+<ul>
+<li>Evaluation of a string literal. The implementation MAY allocate once per literal or once per evaluation.</li>
+<li>String concatenation (Section 8.6.6).</li>
+<li>Casting <code>int</code> or <code>float</code> to <code>string</code> (Section 7.7.1).</li>
+<li>The built-in <code>input</code> (Section 11.3).</li>
+</ul>
+<p><strong>12.2.2</strong> The heap memory allocated by these operations is never freed by the runtime. A program that allocates strings in a loop will leak memory. Zeuz 1.0 has no <code>free</code> operation, no garbage collector, and no ownership system. See Section 14.1.</p>
+<p><strong>12.2.3</strong> A program MAY rely on the heap allocation succeeding. If the host system cannot satisfy the allocation, the behavior is undefined.</p>
+
+<h3>12.3 Value Semantics</h3>
+<p><strong>12.3.1</strong> All assignments and argument passes copy the value. For scalars of type <code>int</code> or <code>float</code>, the copy is a bit-for-bit copy of the value. For scalars of type <code>string</code>, the copy is a copy of the pointer, not the byte sequence; both the original variable and the new variable refer to the same heap allocation. Modifying the heap byte sequence through one variable affects the other, but the byte sequence is immutable in the source language, so this is not observable except through the runtime helpers.</p>
+<p><strong>12.3.2</strong> Arrays are passed to functions as pointers. The callee sees the caller's array, not a copy. Writing to an element of the array parameter modifies the caller's array.</p>
+
+<h3>12.4 Array Layout</h3>
+<p><strong>12.4.1</strong> A local array is a contiguous sequence of elements of the declared type. The element type has a size determined by the implementation: in the reference implementation, 8 bytes for <code>int</code> and <code>float</code>, 8 bytes for <code>string</code> (a pointer).</p>
+<p><strong>12.4.2</strong> The length of a local array is known at the point of declaration and is stored by the implementation for the purpose of <code>len()</code>. The length is not stored in the array itself.</p>
+<p><strong>12.4.3</strong> An array parameter does not carry a length. The callee MUST know the length from an additional scalar parameter or from a protocol between caller and callee.</p>
+<p><strong>12.4.4</strong> The layout of an array is not part of the source-level contract. A program MUST NOT rely on the size, alignment, or ordering of elements in memory.</p>
+
+<h3>12.5 String Representation</h3>
+<p><strong>12.5.1</strong> A value of type <code>string</code> is a pointer to a byte sequence in heap memory. The byte sequence is null-terminated: the byte after the last meaningful byte is a byte with value 0. The length of the string is the number of bytes before the first null byte.</p>
+<p><strong>12.5.2</strong> The byte sequence may contain bytes with value 0 in the middle. In this case the string is truncated at the first null byte for the purpose of <code>len()</code>, string comparison, and <code>print</code>. There is no way to represent a string with an embedded null byte in Zeuz 1.0.</p>
+<p><strong>12.5.3</strong> The byte sequence is immutable in the source language. The source language provides no operation that modifies a string's bytes after creation. The runtime helpers create fresh byte sequences for concatenation and conversion.</p>
+
+<h3>12.6 Lifetime Rules</h3>
+<p><strong>12.6.1</strong> A scalar variable's storage is valid from the point of declaration to the end of the enclosing scope. A reference to a variable after its scope has ended is a compile-time error (Section 10.6).</p>
+<p><strong>12.6.2</strong> An array's storage is valid from the point of declaration to the end of the enclosing function. Zeuz 1.0 does not support returning an array from a function, so an array never outlives its enclosing function.</p>
+<p><strong>12.6.3</strong> A string's heap storage is valid from the point of allocation to program termination. There is no way to free it.</p>
+
+<h3>12.7 Known Memory Hazards</h3>
+<p><strong>12.7.1</strong> Out-of-bounds array indexing (Section 8.10.4) is undefined behavior. A program that indexes outside the declared bounds may crash, produce wrong results, or corrupt memory.</p>
+<p><strong>12.7.2</strong> Heap memory is never freed. Programs that allocate strings in loops will consume memory proportionally to the number of iterations.</p>
+<p><strong>12.7.3</strong> The runtime does not check for null string pointers. Passing a null pointer to <code>print</code>, <code>len</code>, string comparison, or concatenation is undefined behavior.</p>
+<p><strong>12.7.4</strong> Because strings are passed by pointer copy, a program that assigns a string variable to another and then modifies the original's underlying bytes (which the source language does not permit) would observe the change through both variables. This is not a hazard in the source language because the byte sequence is immutable, but it is a property of the memory model that implementers of runtime helpers MUST observe.</p>
+
+<hr>
+
+<h2>13. Program Structure and Execution</h2>
+
+<h3>13.1 Compilation Unit</h3>
+<p><strong>13.1.1</strong> A compilation unit is exactly one source file. Zeuz 1.0 has no <code>import</code>, <code>include</code>, or <code>module</code> mechanism. All program text MUST appear in a single source file.</p>
+<p><strong>13.1.2</strong> The source file MUST be passed to the compiler as the sole input. The compiler MAY accept command-line options but MUST NOT accept additional source files in the same invocation.</p>
+
+<h3>13.2 The entryf Function</h3>
+<p><strong>13.2.1</strong> A well-formed program MUST declare exactly one function whose name is <code>entryf</code>. The declaration MUST have return type <code>void</code> and MUST have zero parameters. The declaration MAY appear anywhere in the source file.</p>
+<p><strong>13.2.2</strong> The body of <code>entryf</code> is the program's entry point. It is executed after any top-level statements that precede the declaration of <code>entryf</code> (but Zeuz 1.0 rejects top-level statements other than function declarations; see Section 13.2.4).</p>
+<p><strong>13.2.3</strong> Other functions MAY be called from <code>entryf</code> and from each other. Function declarations MAY appear in any order (Section 10.5).</p>
+<p><strong>13.2.4 Top-level statements.</strong> In the reference implementation of Zeuz 1.0, top-level statements other than function declarations are rejected. A program consists of function declarations only, of which exactly one is <code>entryf</code>.</p>
+
+<h3>13.3 Program Startup and Exit Code</h3>
+<p><strong>13.3.1</strong> The implementation translates the program to a native binary. When the binary is executed, the operating system enters the C <code>main</code> function generated by the implementation. That function runs the body of <code>entryf</code>.</p>
+<p><strong>13.3.2</strong> The value returned by <code>entryf</code> is used as the process exit code, truncated to an <code>int</code> if necessary. The behavior of <code>entryf</code> without an explicit <code>return</code> is to use 0 as the exit code.</p>
+<p><strong>13.3.3</strong> A <code>return</code> statement inside <code>entryf</code> terminates the function. A <code>return</code> without an operand uses 0 as the exit code. A <code>return</code> with an operand converts the operand to <code>int</code>: a <code>float</code> is truncated toward zero; a <code>string</code> yields 0.</p>
+<p><strong>13.3.4</strong> The process exit code is the low 8 bits of the value returned by <code>entryf</code>, as specified by the host operating system for the C <code>main</code> function.</p>
+<p><strong>13.3.5</strong> If the program terminates because of <code>assert</code>, division by zero, negative array size, or an explicit <code>exit</code> in a runtime helper, the exit code is 1.</p>
+
+<h3>13.4 Undefined Behavior</h3>
+<p><strong>13.4.1</strong> The following conditions produce undefined behavior in Zeuz 1.0:</p>
+<ul>
+<li>Array indexing with an index that is negative or greater than or equal to the declared length (Section 8.10.4).</li>
+<li>Dereferencing a null string pointer (Section 12.7.3).</li>
+<li>Reading or writing through a pointer that does not refer to a valid object (for example, after the object's storage has been released).</li>
+<li>Calling a function with more or fewer arguments than the function declares.</li>
+</ul>
+<p><strong>13.4.2</strong> The following conditions that would produce undefined behavior in C do not produce undefined behavior in Zeuz 1.0:</p>
+<ul>
+<li>Integer overflow is well-defined (Section 8.6.2.4).</li>
+<li>Division by zero terminates the program with a diagnostic (Section 8.6.9).</li>
+</ul>
+
+<h3>13.5 Implementation-Defined Behavior</h3>
+<p><strong>13.5.1</strong> The following behaviors are implementation-defined in Zeuz 1.0:</p>
+<ul>
+<li>The exact column at which a token is reported in a diagnostic (Section 5.2.4).</li>
+<li>The interpretation of non-ASCII bytes in string literals (Section 5.1.3).</li>
+<li>The rounding mode for float literals and for floating-point arithmetic (Section 5.9.4, Section 8.6.2.5).</li>
+<li>The behavior of casting NaN, infinity, or an out-of-range float to <code>int</code> (Section 7.7.1).</li>
+<li>The result of the unary minus operator on NaN (Section 5.13.3).</li>
+<li>The representation of <code>inf</code>, <code>-inf</code>, and <code>nan</code> produced by <code>print</code> on a value of type <code>float</code> (Section 11.1.3).</li>
+<li>The behavior of falling off the end of a non-void function (Section 9.10.4).</li>
+<li>The line length limit for <code>input</code> (Section 11.3.4).</li>
+<li>The size and alignment of elements in an array (Section 12.4.1).</li>
+<li>The behavior of allocation failure (Section 12.2.3).</li>
+</ul>
+<p><strong>13.5.2</strong> An implementation MUST document its choice for each item in Section 13.5.1.</p>
+
+<hr>
+
+<h2>14. Rationale (Non-Normative)</h2>
+
+<h3>14.1 Why No Garbage Collector in v1</h3>
+<p>Zeuz 1.0 targets a single-file, single-translation-unit model with no runtime library beyond the C standard library. A garbage collector would require either a tracing collector (which needs stack maps, precise root identification, and a write barrier) or a reference-counting scheme (which needs compiler-inserted increments and decrements at every pointer copy). Both would substantially increase the implementation complexity of the compiler and the runtime, and both would introduce new failure modes (collector pauses, reference cycles, incorrect stack maps) that the current implementation cannot test. The decision to defer garbage collection is deliberate: it keeps the compiler small enough to be audited, and it makes the memory behavior of every program predictable from the source text. The cost is the leak described in Section 12.2.2, which is documented rather than hidden.</p>
+
+<h3>14.2 Why All Integers Collapse to i64</h3>
+<p>The source language accepts <code>i8</code>, <code>u32</code>, <code>usize</code>, and similar spellings for readability and for compatibility with other languages' type vocabularies. However, the LLVM backend in Zeuz 1.0 emits every integer as <code>i64</code>. Two factors motivate this choice. First, arithmetic on <code>i64</code> is a single LLVM instruction on every target the reference implementation supports; arithmetic on narrower types would require truncation and extension instructions on every operation, which complicates code generation and debugging. Second, having a single integer representation means that the semantics of integer operations are uniform: there is no need to document the promotion rules, the wrapping behavior at each width, or the interaction between signed and unsigned representations. The limitation, which is documented in Section 7.2.2, is that the width and signedness spelled by the programmer are not enforced. A program that requires the exact behavior of <code>u8</code> arithmetic MUST perform the truncation manually.</p>
+
+<h3>14.3 Why String Comparison Uses strcmp</h3>
+<p>Zeuz 1.0 has no pointer identity operator. A programmer who writes <code>if (a == b)</code> for two strings almost certainly means "are the byte sequences equal", not "are the pointers equal". Using pointer identity would produce surprising results for string literals that the implementation chooses to deduplicate or not, and for strings produced by separate calls to <code>input</code> or to concatenation. Using <code>strcmp</code> matches the programmer's intent and matches the behavior of the <code>==</code> operator on strings in most languages the target audience is familiar with. The cost is that string comparison is O(n) in the length of the strings, and that a program cannot test pointer identity even if it wants to. Neither of these is a limitation the language is likely to lift; if pointer identity is needed, the language would need an explicit operator, not a change to <code>==</code>.</p>
+
+<h3>14.4 Why entryf Instead of main</h3>
+<p>The name <code>entryf</code> is chosen to make the distinction between the source-level entry point and the C-level <code>main</code> function explicit. The compiler emits a C <code>main</code> that calls the body of <code>entryf</code> and returns its result as the exit code. Naming the source-level function <code>main</code> would create an ambiguity: does the programmer mean the C <code>main</code> with its <code>argc</code>/<code>argv</code> arguments and its <code>int</code> return type, or does the programmer mean a Zeuz function? By using a distinct name, the reference avoids any possibility of collision and makes the translation explicit.</p>
+
+<h3>14.5 Why No Module System</h3>
+<p>A module system requires resolving names across files, which requires a convention for file paths, a convention for what is exported, and a mechanism for the compiler to locate the files. All three are environment-dependent. Zeuz 1.0 avoids this by requiring all program text in one file. The cost is that programs cannot be split into reusable libraries, which limits the size of program that can be written comfortably. The reserved keywords <code>import</code>, <code>namespace</code>, and <code>export</code> are placeholders for a future module system; until that system is specified, they produce a diagnostic when used.</p>
+
+<h3>14.6 Why AOT Only</h3>
+<p>The compiler emits a native binary before execution. There is no interpreter mode and no JIT. AOT compilation has the advantage that the compiled program's performance is predictable and that the compiler's output can be inspected with standard tools (<code>objdump</code>, <code>gdb</code>, <code>perf</code>). It has the disadvantage that the programmer cannot use the language interactively, which would be useful for small experiments and for teaching. A future revision MAY add an interpreter mode; the language semantics are defined independently of the execution mode, so an interpreter would be a conforming implementation.</p>
+
+<hr>
+
+<h2>15. Future Directions (Non-Normative)</h2>
+
+<h3>15.1 Reserved Features</h3>
+<p>The keywords in Section 5.7 are reserved for features that the working group intends to add. The working group's current priorities, in rough order, are:</p>
+<ol>
+<li>A module system, so that programs can be split into files.</li>
+<li>Pattern matching and algebraic data types, using <code>match</code>, <code>case</code>, and <code>enum</code>.</li>
+<li>Error handling, using <code>try</code>, <code>catch</code>, <code>throw</code>, and possibly <code>defer</code>.</li>
+<li>A minimal form of generics or type parameters, so that data structures can be written once.</li>
+<li>Pointer and reference syntax, for programs that need to share mutable state without passing arrays.</li>
+</ol>
+<p>The working group does not commit to any of these features, nor to any timeline. A keyword's presence in Section 5.7 means only that the working group has considered the feature and does not want its name taken by user code.</p>
+
+<h3>15.2 Possible Memory Model Changes</h3>
+<p>Two changes to the memory model are under consideration:</p>
+<ol>
+<li>A reference-counting scheme for strings, which would allow a program to release string memory deterministically. This would change the value semantics of strings from pointer-copy to reference-count-copy and would require a way to indicate ownership transfer in the source language.</li>
+<li>A bounds-checked array mode, in which array indexing performs a runtime check. This would be a per-array or per-program option, not the default, because the performance cost is significant for programs that already respect bounds.</li>
+</ol>
+<p>Neither change is scheduled. A program written for Zeuz 1.0 that does not depend on the exact heap layout will be source-compatible with either change.</p>
+
+<h3>15.3 Backward Compatibility Policy</h3>
+<p>The working group's policy is that a program that is well-formed under version 1.x remains well-formed under any later version 1.y, and produces the same observable behavior, except where the later version adds a new feature that uses a reserved keyword. The reserved keywords in Section 5.7 are exactly those that the working group expects to use in a future feature; a program that uses a reserved keyword as an identifier is already ill-formed under version 1.0, so a later version that gives the keyword a meaning does not break any existing program.</p>
+<p>A change to the memory model that removes the leak described in Section 12.2.2 would be source-compatible but not binary-compatible. A program that relies on the leak (for example, by assuming that a string remains valid after the function that produced it has returned) is relying on behavior that Section 12.6.3 defines as valid for the lifetime of the process. If a later version shortens the lifetime, that program would break. The working group will document such a change and will provide a migration path.</p>
+
+<hr>
+
+<h2>Appendix A: Grammar Index</h2>
+<p>The productions of Section 6 are listed here in alphabetical order for reference. The number after each name is the production number.</p>
+<ul>
+<li>Additive: G.6.5.6</li>
+<li>ArgList: G.6.5.12</li>
+<li>ArrayInit: G.6.3.5</li>
+<li>AssertStatement: G.6.4.11</li>
+<li>Block: G.6.4.2</li>
+<li>BreakStatement: G.6.4.12</li>
+<li>Cast: G.6.5.9</li>
+<li>Comparison: G.6.5.5</li>
+<li>ContinueStatement: G.6.4.13</li>
+<li>DoWhileStatement: G.6.4.5</li>
+<li>Equality: G.6.5.4</li>
+<li>ExprStatement: G.6.4.14</li>
+<li>Expression: G.6.5.1</li>
+<li>ForInit: G.6.4.7</li>
+<li>ForStatement: G.6.4.6</li>
+<li>FunctionDecl: G.6.3.1</li>
+<li>IfStatement: G.6.4.3</li>
+<li>LogicalAnd: G.6.5.3</li>
+<li>LogicalOr: G.6.5.2</li>
+<li>LoopStatement: G.6.4.8</li>
+<li>Multiplicative: G.6.5.7</li>
+<li>Param: G.6.3.3</li>
+<li>ParamList: G.6.3.2</li>
+<li>Postfix: G.6.5.10</li>
+<li>PostfixSuffix: G.6.5.11</li>
+<li>Primary: G.6.5.13</li>
+<li>PrintStatement: G.6.4.10</li>
+<li>Program: G.6.2.1</li>
+<li>ReturnStatement: G.6.4.9</li>
+<li>Statement: G.6.4.1</li>
+<li>TopLevelDecl: G.6.2.2</li>
+<li>TypeName: G.6.5.14</li>
+<li>Unary: G.6.5.8</li>
+<li>VarDecl: G.6.3.4</li>
+<li>WhileStatement: G.6.4.4</li>
+</ul>
+
+<h2>Appendix B: Reserved Words</h2>
+<p>The following identifiers are reserved for future use. A program that uses any of them in any position is ill-formed. See Section 5.7.</p>
+<ul>
+<li>Pattern matching: <code>match</code>, <code>case</code>, <code>default</code></li>
+<li>Error handling: <code>guard</code>, <code>defer</code>, <code>try</code>, <code>catch</code>, <code>finally</code>, <code>throw</code>, <code>panic</code>, <code>recover</code></li>
+<li>Modules: <code>import</code>, <code>namespace</code>, <code>export</code>, <code>pub</code>, <code>extern</code></li>
+<li>Macros: <code>macro</code></li>
+<li>Declarations: <code>fn</code>, <code>let</code>, <code>var</code>, <code>const</code>, <code>type</code></li>
+<li>Object-orientation: <code>class</code>, <code>trait</code>, <code>impl</code>, <code>extends</code>, <code>super</code>, <code>this</code>, <code>self</code>, <code>interface</code>, <code>struct</code>, <code>enum</code></li>
+<li>Concurrency: <code>async</code>, <code>await</code>, <code>spawn</code>, <code>join</code>, <code>lock</code>, <code>unlock</code>, <code>atomic</code>, <code>sync</code></li>
+<li>Pointers: <code>ptr</code>, <code>rawptr</code>, <code>ref</code>, <code>new</code>, <code>delete</code>, <code>move</code></li>
+<li>Type operators: <code>sizeof</code>, <code>typeof</code></li>
+<li>Storage: <code>unsafe</code>, <code>asm</code>, <code>in</code>, <code>as</code>, <code>pad</code>, <code>reusable</code>, <code>simd</code>, <code>recursive</code>, <code>thread_fn</code>, <code>varint</code>, <code>any</code>, <code>auto</code></li>
+<li>Miscellaneous: <code>arr</code>, <code>slice</code>, <code>yield</code>, <code>goto</code>, <code>block</code></li>
+</ul>
+
+<h2>Appendix C: Precedence Table</h2>
+<p>Operators are listed from lowest precedence (evaluated last) to highest precedence (evaluated first). All binary operators are left-associative; unary operators are right-associative.</p>
+<ol>
+<li><code>||</code> (logical or, short-circuit)</li>
+<li><code>&amp;&amp;</code> (logical and, short-circuit)</li>
+<li><code>==</code>, <code>!=</code> (equality)</li>
+<li><code>&lt;</code>, <code>&gt;</code>, <code>&lt;=</code>, <code>&gt;=</code> (comparison)</li>
+<li><code>+</code>, <code>-</code> (additive)</li>
+<li><code>*</code>, <code>/</code> (multiplicative)</li>
+<li><code>-</code>, <code>!</code> (unary)</li>
+<li><code>(TypeName)</code> (cast)</li>
+<li>Postfix: call <code>()</code>, index <code>[]</code>, assignment <code>=</code></li>
+</ol>
+
+<h2>Appendix D: Example Programs</h2>
+
+<h3>D.1 Hello, World</h3>
+<pre><code>void entryf() {
+    print "Hello, world";
+}</code></pre>
+<p>Output:</p>
+<pre><code>Hello, world</code></pre>
+
+<h3>D.2 Sum of an Array</h3>
+<pre><code>int sum(int arr[], int n) {
+    int total = 0;
+    int i = 0;
+    while (i &lt; n) {
+        total = total + arr[i];
+        i = i + 1;
+    }
+    return total;
+}
+
+void entryf() {
+    int data[5] = {1, 2, 3, 4, 5};
+    int result = sum(data, 5);
+    print result;
+}</code></pre>
+<p>Output:</p>
+<pre><code>15</code></pre>
+
+<h3>D.3 FizzBuzz</h3>
+<pre><code>void entryf() {
+    for (int i = 1; i &lt;= 15; i = i + 1) {
+        if (i / 15 * 15 == i) {
+            print "FizzBuzz";
+        } else if (i / 3 * 3 == i) {
+            print "Fizz";
+        } else if (i / 5 * 5 == i) {
+            print "Buzz";
+        } else {
+            print i;
+        }
+    }
+}</code></pre>
+<p>Output:</p>
+<pre><code>1
+2
+Fizz
+4
+Buzz
+Fizz
+7
+8
+Fizz
+Buzz
+11
+Fizz
+13
+14
+FizzBuzz</code></pre>
+
+<h2>Appendix E: Differences from C</h2>
+<p>Zeuz 1.0 is inspired by C but differs from it in several ways. The following list enumerates the differences that are most likely to surprise a programmer coming from C:</p>
+<ol>
+<li>Entry point is <code>void entryf()</code>, not <code>int main(int argc, char** argv)</code>. See Section 13.2.</li>
+<li>Boolean values are spelled <code>true</code> and <code>false</code> and are integer literals 1 and 0. There is no <code>bool</code> type distinct from <code>int</code> (Section 7.2.1).</li>
+<li>All integer types are 64-bit signed. Width and signedness of <code>i8</code>, <code>u32</code>, and similar are not enforced (Section 7.2.2).</li>
+<li>Integer overflow wraps silently. There is no undefined behavior for overflow (Section 8.6.2.4).</li>
+<li>Division by zero terminates the program with exit code 1 and a diagnostic, for both <code>int</code> and <code>float</code>. C's floating-point division by zero produces infinity (Section 8.6.9).</li>
+<li><code>==</code> on strings compares byte sequences via <code>strcmp</code>, not pointers (Section 8.6.8).</li>
+<li>String concatenation is <code>+</code>, not <code>strcat</code> (Section 8.6.6).</li>
+<li>Implicit conversion from <code>int</code> to <code>string</code> in concatenation and in casts (Section 7.7.1).</li>
+<li>Arrays carry a length, but only for local arrays; array parameters do not (Section 9.13.4).</li>
+<li>No pointer syntax. Arrays are passed as pointers implicitly when declared with <code>[]</code> (Section 6.3.3).</li>
+<li>No <code>switch</code>, <code>goto</code>, <code>struct</code>, <code>enum</code>, or <code>union</code>. The keywords exist as reserved words (Section 5.7) but produce a diagnostic when used.</li>
+<li>No <code>#include</code> or preprocessor. All program text in one file.</li>
+<li><code>print</code> is a statement, not a function (Section 9.11).</li>
+<li><code>assert</code> is a statement, not a macro (Section 9.12).</li>
+<li><code>input</code> is a built-in function, not a library function (Section 11.3).</li>
+<li>No garbage collector, no <code>free</code>. Strings allocated by concatenation, cast, or <code>input</code> are never released (Section 12.2.2).</li>
+<li>Nested block comments are supported (Section 5.3.3). C does not support nested block comments.</li>
+<li>No hexadecimal, octal, or binary integer literals (Section 5.8.2).</li>
+<li>No exponent notation for float literals (Section 5.9.2).</li>
+<li>Character literals have type <code>int</code> and are not distinct from integers (Section 8.4).</li>
+</ol>
+
+<hr>
+
+<p><em>End of document.</em></p>
+
+</body>
+</html>
